@@ -2,6 +2,7 @@
   "name": "thinkflow",
   "version": "1.0.0",
   "description": "ThinkFlow - A task and note management application",
+  "license": "MIT",
   "private": true,
   "workspaces": [
     "client",
