@@ -1,0 +1,80 @@
+// Load environment variables FIRST
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const authRoutes = require('./routes/auth.routes'); // ✓ Using OTP-based routes
+const problemRoutes = require('../routes/problemRoutes');
+const submissionRoutes = require('../routes/submissionRoutes');
+const { init: initDB, pool } = require('./config/db');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
+app.use(express.json());
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/problems', problemRoutes);
+app.use('/api/submissions', submissionRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).json({ 
+    success: false, 
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// Start server
+async function startServer() {
+  try {
+    await initDB();
+    app.listen(PORT, () => {
+      console.log('━'.repeat(60));
+      console.log(`🚀 ThinkFlow Server Running`);
+      console.log('━'.repeat(60));
+      console.log(`📍 Port: ${PORT}`);
+      console.log(`📧 SMTP: ${process.env.SMTP_USER ? '✓ Configured' : '✗ Not configured'}`);
+      console.log(`🔐 JWT: ${process.env.JWT_SECRET ? '✓ Configured' : '✗ Not configured'}`);
+      console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here' ? '✓ Configured' : '⚠️  NOT CONFIGURED'}`);
+      
+      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+        console.log('');
+        console.log('⚠️  WARNING: Gemini API Key not configured!');
+        console.log('   Logic evaluation will use basic fallback (less accurate)');
+        console.log('   📖 See GEMINI_SETUP.md for instructions');
+        console.log('   🔗 Get free API key: https://makersuite.google.com/app/apikey');
+      }
+      
+      console.log(`📊 Node: ${process.version}`);
+      console.log('━'.repeat(60));
+      console.log(`✅ Ready to accept connections`);
+      console.log('━'.repeat(60));
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    console.error('Stack:', error.stack);
+    process.exit(1);
+  }
+}
+
+startServer();
+
+// Handle unhandled rejections
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled rejection:', err);
+  process.exit(1);
+});
