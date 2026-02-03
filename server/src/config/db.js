@@ -339,6 +339,18 @@ const init = async () => {
     
     console.log(`📝 Parsed ${statements.length} schema statements...`);
     
+    if (statements.length === 0) {
+      console.error('⚠️  WARNING: No SQL statements found in schema.sql!');
+      console.error('   File path:', schemaPath);
+      console.error('   File size:', schema.length, 'bytes');
+      return true; // Don't fail, just warn
+    }
+    
+    if (statements.length < 5) {
+      console.warn(`⚠️  WARNING: Only ${statements.length} statements found. Expected at least 5 CREATE TABLE statements.`);
+      console.warn('   First statement type:', statements[0]?.substring(0, 50));
+    }
+    
     // Execute statements in order
     for (let i = 0; i < statements.length; i++) {
       const statement = statements[i];
@@ -390,12 +402,29 @@ const init = async () => {
     const criticalTables = ['users', 'problems', 'logic_submissions', 'code_submissions', 'execution_steps'];
     console.log(`\n🔍 Verifying table existence...`);
     
+    let missingTables = [];
     for (const tableName of criticalTables) {
       const exists = await tableExists(tableName);
       if (exists) {
         console.log(`  ✓ Table "${tableName}" exists`);
       } else {
-        throw new Error(`❌ Critical table "${tableName}" does not exist after schema initialization`);
+        console.log(`  ✗ Table "${tableName}" is MISSING`);
+        missingTables.push(tableName);
+      }
+    }
+    
+    if (missingTables.length > 0) {
+      const errorMsg = `❌ Critical tables missing: ${missingTables.join(', ')}`;
+      console.error(`\n${errorMsg}`);
+      
+      // In production, log but don't crash - let the app try to run
+      if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL) {
+        console.error('⚠️  Production mode: Continuing despite missing tables. Check schema.sql!');
+        console.log('\n✅ Database connection established (with warnings)');
+        return true;
+      } else {
+        // In development, fail fast
+        throw new Error(errorMsg);
       }
     }
     

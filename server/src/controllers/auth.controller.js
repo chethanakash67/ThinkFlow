@@ -246,9 +246,32 @@ const signup = async (req, res) => {
   } catch (error) {
     console.error('\n❌ Signup error:', error.message);
     console.error('Stack:', error.stack);
+    console.error('Error code:', error.code);
+    console.error('Error detail:', error.detail);
+    
+    // Provide detailed error messages for debugging
+    let errorMessage = 'Registration failed. Please try again.';
+    
+    // PostgreSQL error codes
+    if (error.code === '23505') {
+      errorMessage = 'Email already registered. Please use a different email or login.';
+    } else if (error.code === '42P01') {
+      errorMessage = 'Database configuration error. Please contact support. (Table does not exist)';
+      console.error('⚠️  CRITICAL: users table does not exist! Check schema.sql');
+    } else if (error.code === '42703') {
+      errorMessage = 'Database configuration error. Please contact support. (Column does not exist)';
+      console.error('⚠️  CRITICAL: Column missing in users table! Check schema.sql');
+    } else if (error.message) {
+      // In development, expose the real error
+      if (process.env.NODE_ENV === 'development') {
+        errorMessage = error.message;
+      }
+    }
+    
     res.status(500).json({ 
       success: false,
-      error: 'Registration failed. Please try again.'
+      error: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && { debug: error.message })
     });
   }
 };
