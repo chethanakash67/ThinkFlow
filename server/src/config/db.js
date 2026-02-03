@@ -7,13 +7,30 @@ const fs = require('fs');
 const path = require('path');
 
 // Database configuration from environment
-const dbConfig = {
-  user: process.env.DB_USER || 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'thinkflow',
-  password: process.env.DB_PASSWORD || 'postgres',
-  port: process.env.DB_PORT
-};
+// Support both DATABASE_URL (Render/Heroku style) and individual variables
+let dbConfig;
+
+if (process.env.DATABASE_URL) {
+  // Parse DATABASE_URL for production environments like Render
+  const url = new URL(process.env.DATABASE_URL);
+  dbConfig = {
+    user: url.username,
+    host: url.hostname,
+    database: url.pathname.slice(1), // Remove leading '/'
+    password: url.password,
+    port: parseInt(url.port) || 5432,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  };
+} else {
+  // Use individual environment variables for local development
+  dbConfig = {
+    user: process.env.DB_USER || 'postgres',
+    host: process.env.DB_HOST || 'localhost',
+    database: process.env.DB_NAME || 'thinkflow',
+    password: process.env.DB_PASSWORD || 'postgres',
+    port: parseInt(process.env.DB_PORT) || 5432
+  };
+}
 
 let pool = null;
 
@@ -22,6 +39,12 @@ let pool = null;
  * Creates the database if it doesn't exist
  */
 const ensureDatabaseExists = async () => {
+  // Skip database creation in production (Render provides the database)
+  if (process.env.DATABASE_URL || process.env.NODE_ENV === 'production') {
+    console.log('✅ Using existing database (production mode)');
+    return;
+  }
+
   // Connect to default 'postgres' database to check/create our database
   const adminClient = new Client({
     user: dbConfig.user,
@@ -29,6 +52,7 @@ const ensureDatabaseExists = async () => {
     password: dbConfig.password,
     port: dbConfig.port,
     database: 'postgres', // Connect to default database
+    ssl: dbConfig.ssl
   });
 
   try {
@@ -97,6 +121,7 @@ const createPool = () => {
     database: dbConfig.database,
     password: dbConfig.password,
     port: dbConfig.port,
+    ssl: dbConfig.ssl,
     // Connection pool settings
     max: 20, // Maximum number of clients in the pool
     idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
