@@ -52,9 +52,17 @@ export default function SignUpPage() {
         password: formData.password
       });
 
-      // OTP-based signup - always redirect to verify-otp page
       if (response.data.success) {
-        router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
+        // Check if user was auto-verified (SMTP not configured)
+        if (response.data.autoVerified && response.data.token) {
+          // Save token and redirect to dashboard
+          localStorage.setItem('token', response.data.token);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+          router.push('/dashboard');
+        } else {
+          // Normal OTP flow - redirect to verify-otp page
+          router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
+        }
       } else {
         router.push('/login');
       }

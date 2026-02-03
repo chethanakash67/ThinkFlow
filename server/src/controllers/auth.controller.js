@@ -193,18 +193,47 @@ const signup = async (req, res) => {
       console.log(`  ✅ Created new user record`);
     }
 
-    // Send OTP email - CRITICAL: This must succeed
+    // Send OTP email - Try to send, but don't fail signup if email fails in production
+    let emailSent = false;
     try {
       await sendOTPEmail(normalizedEmail, otpCode, 'signup');
+      emailSent = true;
     } catch (emailError) {
-      console.error(`\n❌ EMAIL SEND FAILED:`, emailError.message);
+      console.error(`\n⚠️  EMAIL SEND FAILED:`, emailError.message);
       
-      // Clean up - remove the user if email fails
+      // In production without SMTP configured, auto-verify the user
+      if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.log(`  ℹ️  SMTP not configured - auto-verifying user for production`);
+        
+        // Auto-verify user and generate token
+        await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
+        
+        const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
+        const user = userResult.rows[0];
+        const token = generateToken(user.id);
+        
+        console.log(`✅ User auto-verified (SMTP not configured)\n`);
+        
+        return res.json({
+          success: true,
+          message: 'Account created successfully!',
+          autoVerified: true,
+          token,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          }
+        });
+      }
+      
+      // In development or if SMTP is configured but failed, delete user and return error
       await query('DELETE FROM users WHERE email = $1 AND email_verified = FALSE', [normalizedEmail]);
       
       return res.status(500).json({
         success: false,
-        error: `Unable to send verification email: ${emailError.message}`,
+        error: `Unable to send verification email: ${emailError.message}. Please contact support.`,
       });
     }
 
