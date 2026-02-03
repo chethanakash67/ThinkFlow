@@ -12,7 +12,7 @@ const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   database: process.env.DB_NAME || 'thinkflow',
   password: process.env.DB_PASSWORD || 'postgres',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
+  port: process.env.DB_PORT
 };
 
 let pool = null;
