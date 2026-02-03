@@ -14,7 +14,7 @@ export default function LandingPage() {
         <div className="nav-container">
           <a href="/" className="nav-brand">
             <div className="brand-icon">
-              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={100} height={100} />
             </div>
             <span className="brand-text">ThinkFlow</span>
           </a>

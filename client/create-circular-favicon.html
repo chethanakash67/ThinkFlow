@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Circular Favicon</title>
+</head>
+<body>
+    <canvas id="canvas" width="256" height="256" style="display:none;"></canvas>
+    <img id="output" style="display:none;">
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = function() {
+            // Draw circular clipping path
+            ctx.beginPath();
+            ctx.arc(128, 128, 128, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            
+            // Draw image
+            ctx.drawImage(img, 0, 0, 256, 256);
+            
+            // Convert to PNG and download
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'favicon.png';
+                a.click();
+                console.log('Circular favicon created! Check your downloads.');
+            });
+        };
+        
+        img.src = '/assets/logo.jpeg';
+    </script>
+</body>
+</html>
