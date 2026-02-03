@@ -2,6 +2,7 @@
 
 import './landingpage.css';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -12,7 +13,9 @@ export default function LandingPage() {
       <nav className="nav">
         <div className="nav-container">
           <a href="/" className="nav-brand">
-            <div className="brand-icon"></div>
+            <div className="brand-icon">
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+            </div>
             <span className="brand-text">ThinkFlow</span>
           </a>
           <div className="nav-links">
@@ -218,7 +221,9 @@ export default function LandingPage() {
       <footer className="footer">
         <div className="footer-container">
           <div className="footer-brand">
-            <div className="brand-icon"></div>
+            <div className="brand-icon">
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+            </div>
             <span className="brand-text">ThinkFlow</span>
             <p className="footer-tagline">Master logic through practice</p>
           </div>

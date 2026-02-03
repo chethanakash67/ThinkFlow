@@ -84,6 +84,7 @@ router.post('/verify-otp', verifyOTPValidation, authController.verifyOTP);
 router.post('/resend-otp', resendOTPValidation, authController.resendOTP);
 router.get('/me', authenticateToken, authController.getMe);
 router.post('/forgot-password', authController.forgotPassword);
+router.post('/verify-reset-otp', authController.verifyResetOtp);
 router.post('/reset-password', resetPasswordValidation, authController.resetPassword);
 
 module.exports = router;

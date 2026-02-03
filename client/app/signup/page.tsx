@@ -3,6 +3,7 @@
 import './signup.css';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import api from '@/lib/api';
 
 export default function SignUpPage() {
@@ -72,7 +73,9 @@ export default function SignUpPage() {
         </a>
         <div className="left-content">
           <div className="brand-showcase">
-            <div className="brand-icon-large"></div>
+            <div className="brand-icon-large">
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={80} height={80} />
+            </div>
             <h1 className="brand-title">ThinkFlow</h1>
             <p className="brand-tagline">Your Journey to Better Problem-Solving Starts Here</p>
           </div>
@@ -179,7 +182,7 @@ export default function SignUpPage() {
               onChange={handleChange}
               required
               className="form-input"
-              placeholder="John Doe"
+              placeholder="Your Full Name"
               disabled={loading}
             />
           </div>

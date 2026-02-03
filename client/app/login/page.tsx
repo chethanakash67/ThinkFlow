@@ -3,6 +3,7 @@
 import './login.css';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useAuth } from '@/context/auth.context';
 
 export default function LoginPage() {
@@ -37,7 +38,9 @@ export default function LoginPage() {
         </a>
         <div className="left-content">
           <div className="brand-showcase">
-            <div className="brand-icon-large"></div>
+            <div className="brand-icon-large">
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={80} height={80} />
+            </div>
             <h1 className="brand-title">ThinkFlow</h1>
             <p className="brand-tagline">Master Problem-Solving Through Logic</p>
           </div>

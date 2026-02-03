@@ -622,6 +622,68 @@ const resetPassword = async (req, res) => {
   }
 };
 
+/**
+ * Verify Reset OTP - Step 2 (intermediate): Validate OTP without clearing it
+ * POST /api/auth/verify-reset-otp
+ */
+const verifyResetOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and OTP are required',
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedOtp = otp.trim();
+
+    console.log(`\n🔍 Verifying reset OTP for ${normalizedEmail}`);
+
+    // Find user with matching OTP
+    const result = await query(
+      `SELECT id, otp_code, otp_expires, otp_type
+       FROM users WHERE email = $1 AND otp_code = $2 AND otp_type = 'forgot-password'`,
+      [normalizedEmail, normalizedOtp]
+    );
+
+    if (result.rows.length === 0) {
+      console.log(`  ❌ Invalid OTP`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid OTP. Please try again.',
+      });
+    }
+
+    const user = result.rows[0];
+
+    // Check if OTP expired
+    if (new Date(user.otp_expires) < new Date()) {
+      console.log(`  ❌ OTP expired`);
+      return res.status(400).json({
+        success: false,
+        error: 'OTP has expired. Please request a new one.',
+      });
+    }
+
+    console.log(`  ✅ Reset OTP verified successfully\n`);
+
+    // Don't clear the OTP here - it will be used in reset-password step
+    res.json({
+      success: true,
+      message: 'OTP verified successfully. You can now reset your password.',
+    });
+  } catch (error) {
+    console.error('\n❌ Reset OTP verification error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify OTP',
+    });
+  }
+};
+
 module.exports = {
   signup,
   signin,
@@ -630,4 +692,5 @@ module.exports = {
   resendOTP,
   forgotPassword,
   resetPassword,
+  verifyResetOtp,
 };

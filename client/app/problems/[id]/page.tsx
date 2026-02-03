@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Image from 'next/image'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { getCurrentUser, logout } from '@/lib/auth'
 import api from '@/lib/api'
-import { FaSignOutAlt, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaArrowLeft, FaPlus, FaTrash } from 'react-icons/fa'
+import { FaSignOutAlt, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaArrowLeft, FaPlus, FaTrash, FaLightbulb, FaRobot } from 'react-icons/fa'
 import dynamic from 'next/dynamic'
 import './problem-detail.css'
 
@@ -231,11 +232,11 @@ export default function ProblemDetailPage() {
       
       // Show success/failure message
       if (response.data.submission.status === 'correct') {
-        alert('🎉 All test cases passed!')
+        alert('✓ All test cases passed!')
       } else if (response.data.submission.status === 'partially_correct') {
-        alert(`⚠️ ${response.data.submission.passedCount}/${response.data.submission.totalCount} test cases passed`)
+        alert(`⚠ ${response.data.submission.passedCount}/${response.data.submission.totalCount} test cases passed`)
       } else {
-        alert('❌ Test cases failed. Check the results below for details.')
+        alert('✗ Test cases failed. Check the results below for details.')
       }
     } catch (error: any) {
       console.error('Code submission error:', error)
@@ -252,7 +253,7 @@ export default function ProblemDetailPage() {
         errorMsg = error.message
       }
       
-      alert('❌ ' + errorMsg)
+      alert('✗ ' + errorMsg)
       console.log('Full error details:', error.response?.data)
       
       // If there's a detailed error, show it in the UI
@@ -293,7 +294,7 @@ export default function ProblemDetailPage() {
     
     // Generate contextual suggestions based on problem type
     if (title.includes('two sum') || title.includes('sum')) {
-      return `💡 **Suggested Approach:**
+      return `**Suggested Approach:**
 
 1. **Input Processing**: Parse the input array and target value
 2. **Data Structure Setup**: Create a hash map to store numbers and their indices
@@ -304,7 +305,7 @@ export default function ProblemDetailPage() {
     }
     
     if (title.includes('reverse')) {
-      return `💡 **Suggested Approach:**
+      return `**Suggested Approach:**
 
 1. **Input Validation**: Check if input is valid and not empty
 2. **Initialize Pointers**: Set up two pointers at start and end
@@ -314,7 +315,7 @@ export default function ProblemDetailPage() {
     }
     
     if (title.includes('palindrome')) {
-      return `💡 **Suggested Approach:**
+      return `**Suggested Approach:**
 
 1. **Input Processing**: Clean and normalize the input string
 2. **Two-Pointer Setup**: Initialize left pointer at start, right at end
@@ -325,7 +326,7 @@ export default function ProblemDetailPage() {
     }
     
     if (title.includes('interval') || title.includes('merge')) {
-      return `💡 **Suggested Approach:**
+      return `**Suggested Approach:**
 
 1. **Input Validation**: Check if intervals array is valid
 2. **Sort Intervals**: Sort intervals by start time in ascending order
@@ -338,7 +339,7 @@ export default function ProblemDetailPage() {
     
     // Generic suggestion based on difficulty
     if (difficulty === 'easy') {
-      return `💡 **Suggested Approach for Easy Problem:**
+      return `**Suggested Approach for Easy Problem:**
 
 1. **Understand Input**: Identify what data you're working with
 2. **Define Goal**: What output/result do you need?
@@ -348,7 +349,7 @@ export default function ProblemDetailPage() {
     }
     
     if (difficulty === 'medium') {
-      return `💡 **Suggested Approach for Medium Problem:**
+      return `**Suggested Approach for Medium Problem:**
 
 1. **Input Processing**: Parse and validate input data
 2. **Choose Data Structure**: Hash map, set, or array based on needs
@@ -359,7 +360,7 @@ export default function ProblemDetailPage() {
     }
     
     if (difficulty === 'hard') {
-      return `💡 **Suggested Approach for Hard Problem:**
+      return `**Suggested Approach for Hard Problem:**
 
 1. **Problem Analysis**: Break down complex requirements
 2. **Algorithm Design**: Choose optimal algorithm (DP, Graph, etc.)
@@ -370,7 +371,7 @@ export default function ProblemDetailPage() {
 7. **Return Solution**: Output the final optimized result`
     }
     
-    return `💡 **General Problem-Solving Approach:**
+    return `**General Problem-Solving Approach:**
 
 1. **Understand the Problem**: Read requirements carefully
 2. **Identify Patterns**: Look for similar problems you've solved
@@ -416,7 +417,9 @@ export default function ProblemDetailPage() {
         <nav className="problem-navbar">
           <div className="problem-navbar-content">
             <div className="problem-brand" onClick={() => router.push('/dashboard')}>
-              <div className="problem-brand-icon"></div>
+              <div className="problem-brand-icon">
+                <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+              </div>
               <span className="problem-brand-text">ThinkFlow</span>
             </div>
             <div className="problem-navbar-actions">
@@ -486,14 +489,22 @@ export default function ProblemDetailPage() {
                 disabled={loadingSuggestion}
                 className="btn btn-ai-suggestion"
               >
-                {loadingSuggestion ? '🤔 Thinking...' : '💡 Get AI Suggestion'}
+                {loadingSuggestion ? (
+                  <>
+                    <FaRobot /> Thinking...
+                  </>
+                ) : (
+                  <>
+                    <FaLightbulb /> Get AI Suggestion
+                  </>
+                )}
               </button>
             </div>
 
             {aiSuggestion && (
               <div className="ai-suggestion-box">
                 <div className="ai-suggestion-header">
-                  <span className="ai-badge">🤖 AI Assistant</span>
+                  <span className="ai-badge"><FaRobot /> AI Assistant</span>
                 </div>
                 <div className="ai-suggestion-content">
                   {aiSuggestion.split('\n').map((line, idx) => (
@@ -543,7 +554,7 @@ export default function ProblemDetailPage() {
                 <FaPlus /> Add Step
               </button>
               <button onClick={getAISuggestion} disabled={loadingSuggestion} className="btn btn-ai">
-                💡 {loadingSuggestion ? 'Loading...' : 'Need Help?'}
+                <FaLightbulb /> {loadingSuggestion ? 'Loading...' : 'Need Help?'}
               </button>
               <button
                 onClick={handleSubmitLogic}
@@ -587,7 +598,7 @@ export default function ProblemDetailPage() {
                   </select>
                   {syntaxErrors.length > 0 && (
                     <span className="code-editor-error-badge">
-                      ⚠️ {syntaxErrors.length} error{syntaxErrors.length > 1 ? 's' : ''}
+                      <FaExclamationTriangle /> {syntaxErrors.length} error{syntaxErrors.length > 1 ? 's' : ''}
                     </span>
                   )}
                 </div>
@@ -657,10 +668,10 @@ export default function ProblemDetailPage() {
                 />
                 {syntaxErrors.length > 0 && (
                   <div className="code-errors-panel">
-                    <div className="code-errors-title">⚠️ Syntax Errors:</div>
+                    <div className="code-errors-title"><FaExclamationTriangle /> Syntax Errors:</div>
                     {syntaxErrors.map((err, idx) => (
                       <div key={idx} className="code-error-item">
-                        <span className="error-icon">❌</span>
+                        <span className="error-icon"><FaTimesCircle /></span>
                         <span className="error-message">{err.message}</span>
                       </div>
                     ))}

@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import api from '@/lib/api'
 import { getCurrentUser } from '@/lib/auth'
@@ -67,12 +68,24 @@ function ProblemsContent() {
       <nav className="problems-navbar">
         <div className="navbar-content">
           <Link href="/dashboard" className="navbar-brand">
-            <div className="navbar-icon"></div>
+            <div className="navbar-icon">
+              <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+            </div>
             <span className="navbar-text">ThinkFlow</span>
           </Link>
           <div className="navbar-actions">
-            <Link href="/dashboard" className="navbar-link">Dashboard</Link>
-            <Link href="/problems" className="navbar-link active">Problems</Link>
+            <Link href="/dashboard" className="navbar-link navbar-link-back">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Back to Dashboard
+            </Link>
+            <Link href="/problems" className="navbar-link active">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 2L3 7H6V14H10V7H13L8 2Z" fill="currentColor"/>
+              </svg>
+              Problems
+            </Link>
             <span className="navbar-email">{user?.email}</span>
             <button onClick={handleLogout} className="navbar-logout">
               <FaSignOutAlt /> Logout

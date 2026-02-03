@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { getCurrentUser } from '@/lib/auth';
 import api from '@/lib/api';
+import { FaFileAlt, FaCheckCircle, FaBullseye, FaInbox } from 'react-icons/fa';
+import Image from 'next/image';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -54,7 +56,9 @@ export default function DashboardPage() {
         <header className="dashboard-header">
           <div className="header-content">
             <a href="/" className="brand-link">
-              <div className="brand-icon"></div>
+              <div className="brand-icon">
+                <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
+              </div>
               <span className="brand-text">ThinkFlow</span>
             </a>
             <div className="header-actions">
@@ -83,7 +87,7 @@ export default function DashboardPage() {
                 <div className="stat-card">
                   <div className="stat-header">
                     <span className="stat-label">Total Submissions</span>
-                    <div className="stat-icon stat-icon-1">📝</div>
+                    <div className="stat-icon stat-icon-1"><FaFileAlt /></div>
                   </div>
                   <div className="stat-value">{stats?.total_submissions || 0}</div>
                 </div>
@@ -91,7 +95,7 @@ export default function DashboardPage() {
                 <div className="stat-card">
                   <div className="stat-header">
                     <span className="stat-label">Correct Solutions</span>
-                    <div className="stat-icon stat-icon-2">✓</div>
+                    <div className="stat-icon stat-icon-2"><FaCheckCircle /></div>
                   </div>
                   <div className="stat-value">{stats?.correct_count || 0}</div>
                 </div>
@@ -99,7 +103,7 @@ export default function DashboardPage() {
                 <div className="stat-card">
                   <div className="stat-header">
                     <span className="stat-label">Problems Attempted</span>
-                    <div className="stat-icon stat-icon-3">🎯</div>
+                    <div className="stat-icon stat-icon-3"><FaBullseye /></div>
                   </div>
                   <div className="stat-value">{stats?.problems_attempted || 0}</div>
                 </div>
@@ -121,7 +125,7 @@ export default function DashboardPage() {
                 <h2 className="section-title">Recent Submissions</h2>
                 {recentSubmissions.length === 0 ? (
                   <div className="empty-state">
-                    <div className="empty-state-icon">📭</div>
+                    <div className="empty-state-icon"><FaInbox /></div>
                     <p className="empty-state-message">No submissions yet. Start solving problems!</p>
                     <a href="/problems" className="empty-state-button">
                       Browse Problems
