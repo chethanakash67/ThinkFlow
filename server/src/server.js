@@ -6,7 +6,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth.routes'); // ✓ Using OTP-based routes
 const problemRoutes = require('../routes/problemRoutes');
 const submissionRoutes = require('../routes/submissionRoutes');
-const { init: initDB, pool } = require('./config/db');
+const { init: initDB, pool, runMigrations } = require('./config/db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,6 +42,7 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     await initDB();
+    await runMigrations(); // Run migrations to add missing columns
     app.listen(PORT, () => {
       console.log('━'.repeat(60));
       console.log(`🚀 ThinkFlow Server Running`);

@@ -508,4 +508,62 @@ const insertInitialData = async () => {
   }
 };
 
-module.exports = { pool: () => pool, query, init, close, testConnection, insertInitialData };
+/**
+ * Run migrations to add missing columns to existing tables
+ * This is called after schema init to ensure columns exist
+ */
+const runMigrations = async () => {
+  const dbPool = createPool();
+  console.log('\n🔄 Running migrations...');
+  
+  const migrations = [
+    {
+      name: 'Add otp_code to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_code'`,
+      run: `ALTER TABLE users ADD COLUMN otp_code VARCHAR(6)`
+    },
+    {
+      name: 'Add otp_expires to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_expires'`,
+      run: `ALTER TABLE users ADD COLUMN otp_expires TIMESTAMP`
+    },
+    {
+      name: 'Add otp_type to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_type'`,
+      run: `ALTER TABLE users ADD COLUMN otp_type VARCHAR(50)`
+    },
+    {
+      name: 'Add email_verified to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'email_verified'`,
+      run: `ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE`
+    },
+    {
+      name: 'Add test_results to code_submissions',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'code_submissions' AND column_name = 'test_results'`,
+      run: `ALTER TABLE code_submissions ADD COLUMN test_results JSONB`
+    },
+    {
+      name: 'Add execution_time to code_submissions',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'code_submissions' AND column_name = 'execution_time'`,
+      run: `ALTER TABLE code_submissions ADD COLUMN execution_time INTEGER DEFAULT 0`
+    }
+  ];
+
+  for (const migration of migrations) {
+    try {
+      const checkResult = await dbPool.query(migration.check);
+      if (checkResult.rows.length === 0) {
+        await dbPool.query(migration.run);
+        console.log(`  ✅ ${migration.name}`);
+      } else {
+        console.log(`  ⊙ ${migration.name} (already exists)`);
+      }
+    } catch (error) {
+      console.error(`  ❌ ${migration.name}: ${error.message}`);
+    }
+  }
+  
+  console.log('✅ Migrations complete\n');
+};
+
+module.exports = { pool: () => pool, query, init, close, testConnection, insertInitialData, runMigrations };
