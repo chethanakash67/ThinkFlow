@@ -241,3 +241,36 @@ VALUES (
   ]'::jsonb
 )
 ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- MIGRATIONS: Add columns to existing tables (safe to run multiple times)
+-- This ensures OTP fields exist even if the table was created before
+-- ============================================================================
+
+-- Add OTP columns to users table if they don't exist
+DO $$ 
+BEGIN
+    -- Add otp_code column
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_code') THEN
+        ALTER TABLE users ADD COLUMN otp_code VARCHAR(6);
+        RAISE NOTICE 'Added column: otp_code';
+    END IF;
+
+    -- Add otp_expires column
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_expires') THEN
+        ALTER TABLE users ADD COLUMN otp_expires TIMESTAMP;
+        RAISE NOTICE 'Added column: otp_expires';
+    END IF;
+
+    -- Add otp_type column
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_type') THEN
+        ALTER TABLE users ADD COLUMN otp_type VARCHAR(50);
+        RAISE NOTICE 'Added column: otp_type';
+    END IF;
+
+    -- Add email_verified column
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'email_verified') THEN
+        ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE;
+        RAISE NOTICE 'Added column: email_verified';
+    END IF;
+END $$;
