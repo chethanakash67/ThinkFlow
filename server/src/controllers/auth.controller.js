@@ -150,7 +150,17 @@ const signup = async (req, res) => {
     console.log(`\n📝 Signup request for: ${normalizedEmail}`);
 
     // Check if user already exists
-    const existingUser = await query('SELECT id, email_verified FROM users WHERE email = $1', [normalizedEmail]);
+    let existingUser;
+    try {
+      existingUser = await query('SELECT id, email_verified FROM users WHERE email = $1', [normalizedEmail]);
+    } catch (dbError) {
+      console.error('❌ Database error checking user:', dbError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Database error. Please try again later.'
+      });
+    }
+
     if (existingUser.rows.length > 0) {
       if (existingUser.rows[0].email_verified) {
         return res.status(400).json({ 
@@ -174,70 +184,92 @@ const signup = async (req, res) => {
     console.log(`  ⏰ Expires: ${otpExpires.toLocaleString()}`);
 
     // Store user data (or update if exists)
-    if (existingUser.rows.length > 0) {
-      // Update existing unverified user
-      await query(
-        `UPDATE users 
-         SET name = $1, password_hash = $2, otp_code = $3, otp_expires = $4, otp_type = 'signup'
-         WHERE email = $5`,
-        [name.trim(), passwordHash, otpCode, otpExpires, normalizedEmail]
-      );
-      console.log(`  ✅ Updated user record`);
-    } else {
-      // Insert new user (not verified yet)
-      await query(
-        `INSERT INTO users (name, email, password_hash, otp_code, otp_expires, otp_type, email_verified)
-         VALUES ($1, $2, $3, $4, $5, 'signup', FALSE)`,
-        [name.trim(), normalizedEmail, passwordHash, otpCode, otpExpires]
-      );
-      console.log(`  ✅ Created new user record`);
-    }
-
-    // Send OTP email - Try to send, but don't fail signup if email fails in production
-    let emailSent = false;
     try {
-      await sendOTPEmail(normalizedEmail, otpCode, 'signup');
-      emailSent = true;
-    } catch (emailError) {
-      console.error(`\n⚠️  EMAIL SEND FAILED:`, emailError.message);
-      
-      // In production without SMTP configured, auto-verify the user
-      if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.log(`  ℹ️  SMTP not configured - auto-verifying user for production`);
-        
-        // Auto-verify user and generate token
-        await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
-        
-        const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
-        const user = userResult.rows[0];
-        const token = generateToken(user.id);
-        
-        console.log(`✅ User auto-verified (SMTP not configured)\n`);
-        
-        return res.json({
-          success: true,
-          message: 'Account created successfully!',
-          autoVerified: true,
-          token,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-          }
-        });
+      if (existingUser.rows.length > 0) {
+        // Update existing unverified user
+        await query(
+          `UPDATE users 
+           SET name = $1, password_hash = $2, otp_code = $3, otp_expires = $4, otp_type = 'signup'
+           WHERE email = $5`,
+          [name.trim(), passwordHash, otpCode, otpExpires, normalizedEmail]
+        );
+        console.log(`  ✅ Updated user record`);
+      } else {
+        // Insert new user (not verified yet)
+        await query(
+          `INSERT INTO users (name, email, password_hash, otp_code, otp_expires, otp_type, email_verified)
+           VALUES ($1, $2, $3, $4, $5, 'signup', FALSE)`,
+          [name.trim(), normalizedEmail, passwordHash, otpCode, otpExpires]
+        );
+        console.log(`  ✅ Created new user record`);
       }
-      
-      // In development or if SMTP is configured but failed, delete user and return error
-      await query('DELETE FROM users WHERE email = $1 AND email_verified = FALSE', [normalizedEmail]);
-      
+    } catch (dbError) {
+      console.error('❌ Database error saving user:', dbError.message, dbError.code);
       return res.status(500).json({
         success: false,
-        error: `Unable to send verification email: ${emailError.message}. Please contact support.`,
+        error: 'Failed to create account. Please try again.'
       });
     }
 
-    console.log(`✅ Signup successful for ${normalizedEmail}\n`);
+    // Check if SMTP is configured
+    const smtpConfigured = process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_HOST;
+    console.log(`  📧 SMTP configured: ${smtpConfigured ? 'Yes' : 'No'}`);
+
+    if (!smtpConfigured) {
+      // Auto-verify user when SMTP is not configured
+      console.log(`  ℹ️  SMTP not configured - auto-verifying user`);
+      
+      await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
+      
+      const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
+      const user = userResult.rows[0];
+      const token = generateToken(user.id);
+      
+      console.log(`✅ User auto-verified (SMTP not configured)\n`);
+      
+      return res.json({
+        success: true,
+        message: 'Account created successfully!',
+        autoVerified: true,
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        }
+      });
+    }
+
+    // Send OTP email
+    try {
+      await sendOTPEmail(normalizedEmail, otpCode, 'signup');
+      console.log(`✅ OTP email sent to ${normalizedEmail}\n`);
+    } catch (emailError) {
+      console.error(`\n⚠️  EMAIL SEND FAILED:`, emailError.message);
+      
+      // Email failed - auto-verify the user so they can still use the app
+      console.log(`  ℹ️  Email failed - auto-verifying user`);
+      
+      await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
+      
+      const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
+      const user = userResult.rows[0];
+      const token = generateToken(user.id);
+      
+      return res.json({
+        success: true,
+        message: 'Account created successfully!',
+        autoVerified: true,
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        }
+      });
+    }
 
     res.json({
       success: true,
