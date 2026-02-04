@@ -61,13 +61,25 @@ function VerifyOTPContent() {
     const otpString = otp.join('');
 
     try {
-      await api.post('/auth/verify-otp', { 
+      const response = await api.post('/auth/verify-otp', { 
         email, 
         otp: otpString,
         type: 'signup'
       });
+      
       setSuccess('Email verified successfully!');
-      setTimeout(() => router.push('/login?verified=true'), 1500);
+      
+      // If server returns token, save it and go to dashboard
+      if (response.data.token) {
+        document.cookie = `token=${response.data.token}; path=/; max-age=${7 * 24 * 60 * 60}`;
+        if (response.data.user) {
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+        }
+        setTimeout(() => router.push('/dashboard'), 1500);
+      } else {
+        // Otherwise redirect to login
+        setTimeout(() => router.push('/login?verified=true'), 1500);
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Verification failed. Please try again.');
     } finally {

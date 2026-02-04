@@ -52,21 +52,26 @@ export default function SignUpPage() {
         password: formData.password
       });
 
+      console.log('Signup response:', response.data);
+
       if (response.data.success) {
-        // Check if user was auto-verified (SMTP not configured)
+        // Check if user was auto-verified (SMTP not configured or email failed)
         if (response.data.autoVerified && response.data.token) {
-          // Save token and redirect to dashboard
-          localStorage.setItem('token', response.data.token);
+          // Save token to cookie
+          document.cookie = `token=${response.data.token}; path=/; max-age=${7 * 24 * 60 * 60}`;
           localStorage.setItem('user', JSON.stringify(response.data.user));
+          // Redirect to dashboard
           router.push('/dashboard');
         } else {
           // Normal OTP flow - redirect to verify-otp page
           router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
         }
       } else {
-        router.push('/login');
+        // Show error message from server
+        setError(response.data.error || 'Signup failed. Please try again.');
       }
     } catch (err: any) {
+      console.error('Signup error:', err);
       setError(err.response?.data?.error || 'Signup failed. Please try again.');
     } finally {
       setLoading(false);
