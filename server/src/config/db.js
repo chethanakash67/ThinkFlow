@@ -312,7 +312,7 @@ const parseSchemaStatements = (schemaContent) => {
 
 /**
  * Initialize database schema
- * Reads and executes schema.sql file
+ * Creates tables directly without parsing schema.sql
  */
 const init = async () => {
   try {
@@ -325,109 +325,140 @@ const init = async () => {
     // Step 3: Test connection
     await testConnection();
 
-    // Step 4: Read and execute schema
-    const schemaPath = path.join(__dirname, 'schema.sql');
-    
-    if (!fs.existsSync(schemaPath)) {
-      throw new Error(`Schema file not found at: ${schemaPath}`);
+    // Step 4: Create tables directly (more reliable than parsing SQL file)
+    console.log('📝 Creating database tables...');
+
+    // Create users table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'user',
+        email_verified BOOLEAN DEFAULT FALSE,
+        otp_code VARCHAR(6),
+        otp_expires TIMESTAMP,
+        otp_type VARCHAR(50),
+        email_verification_token VARCHAR(255),
+        password_reset_token VARCHAR(255),
+        password_reset_expires TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: users');
+
+    // Create problems table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS problems (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        difficulty VARCHAR(50) NOT NULL,
+        test_cases JSONB NOT NULL,
+        expected_outputs JSONB NOT NULL,
+        constraints TEXT,
+        examples JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: problems');
+
+    // Create logic_submissions table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS logic_submissions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+        logic_steps JSONB NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        feedback TEXT,
+        score INTEGER DEFAULT 0,
+        version INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: logic_submissions');
+
+    // Create code_submissions table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS code_submissions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+        logic_submission_id INTEGER REFERENCES logic_submissions(id) ON DELETE SET NULL,
+        code TEXT NOT NULL,
+        language VARCHAR(50) DEFAULT 'javascript',
+        status VARCHAR(50) DEFAULT 'pending',
+        execution_result TEXT,
+        test_results JSONB,
+        execution_time INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: code_submissions');
+
+    // Create execution_steps table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS execution_steps (
+        id SERIAL PRIMARY KEY,
+        logic_submission_id INTEGER NOT NULL REFERENCES logic_submissions(id) ON DELETE CASCADE,
+        step_number INTEGER NOT NULL,
+        step_description TEXT NOT NULL,
+        variables_state JSONB,
+        condition_result BOOLEAN,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: execution_steps');
+
+    // Create pending_registrations table
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS pending_registrations (
+        id SERIAL PRIMARY KEY,
+        full_name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        otp VARCHAR(6) NOT NULL,
+        otp_expiry TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: pending_registrations');
+
+    // Create indexes
+    console.log('📝 Creating indexes...');
+    const indexes = [
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+      'CREATE INDEX IF NOT EXISTS idx_problems_difficulty ON problems(difficulty)',
+      'CREATE INDEX IF NOT EXISTS idx_logic_submissions_user ON logic_submissions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_logic_submissions_problem ON logic_submissions(problem_id)',
+      'CREATE INDEX IF NOT EXISTS idx_code_submissions_user ON code_submissions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_code_submissions_problem ON code_submissions(problem_id)',
+      'CREATE INDEX IF NOT EXISTS idx_execution_steps_submission ON execution_steps(logic_submission_id)'
+    ];
+
+    for (const indexSql of indexes) {
+      try {
+        await dbPool.query(indexSql);
+      } catch (e) {
+        // Ignore index already exists errors
+      }
+    }
+    console.log('  ✓ Indexes created');
+
+    // Seed sample problems if none exist
+    const problemCount = await dbPool.query('SELECT COUNT(*) FROM problems');
+    if (parseInt(problemCount.rows[0].count) === 0) {
+      console.log('📝 Seeding sample problems...');
+      await seedProblems(dbPool);
+      console.log('  ✓ Sample problems added');
     }
 
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    
-    // Parse schema into individual statements
-    const statements = parseSchemaStatements(schema);
-    
-    console.log(`📝 Parsed ${statements.length} schema statements...`);
-    
-    if (statements.length === 0) {
-      console.error('⚠️  WARNING: No SQL statements found in schema.sql!');
-      console.error('   File path:', schemaPath);
-      console.error('   File size:', schema.length, 'bytes');
-      return true; // Don't fail, just warn
-    }
-    
-    if (statements.length < 5) {
-      console.warn(`⚠️  WARNING: Only ${statements.length} statements found. Expected at least 5 CREATE TABLE statements.`);
-      console.warn('   First statement type:', statements[0]?.substring(0, 50));
-    }
-    
-    // Execute statements in order
-    for (let i = 0; i < statements.length; i++) {
-      const statement = statements[i];
-      const statementType = statement.trim().substring(0, 12).toUpperCase();
-      
-      try {
-        // Execute the statement
-        await dbPool.query(statement);
-        
-        // Log table creation
-        if (statementType.includes('CREATE TABLE')) {
-          const tableMatch = statement.match(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:public\.)?(\w+)/i);
-          if (tableMatch) {
-            const tableName = tableMatch[1];
-            console.log(`  ✓ Created table: ${tableName}`);
-          }
-        }
-      } catch (error) {
-        // Handle specific error codes
-        if (error.code === '42P07') {
-          // Table already exists (CREATE TABLE IF NOT EXISTS should prevent this, but handle it)
-          const tableMatch = statement.match(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:public\.)?(\w+)/i);
-          if (tableMatch) {
-            console.log(`  ⊙ Table already exists: ${tableMatch[1]}`);
-          }
-          continue;
-        }
-        
-        if (error.code === '42710') {
-          // Object already exists (indexes, constraints, etc.)
-          console.log(`  ⊙ Object already exists, skipping...`);
-          continue;
-        }
-        
-        if (error.code === '23505') {
-          // Unique constraint violation (INSERT duplicate)
-          console.log(`  ⊙ Data already exists, skipping INSERT...`);
-          continue;
-        }
-        
-        // For other errors, log and re-throw
-        console.error(`❌ Error executing statement ${i + 1}:`, error.message);
-        console.error(`Statement preview:`, statement.substring(0, 100));
-        throw error;
-      }
-    }
-    
-    // Verify critical tables exist
-    const criticalTables = ['users', 'problems', 'logic_submissions', 'code_submissions', 'execution_steps'];
-    console.log(`\n🔍 Verifying table existence...`);
-    
-    let missingTables = [];
-    for (const tableName of criticalTables) {
-      const exists = await tableExists(tableName);
-      if (exists) {
-        console.log(`  ✓ Table "${tableName}" exists`);
-      } else {
-        console.log(`  ✗ Table "${tableName}" is MISSING`);
-        missingTables.push(tableName);
-      }
-    }
-    
-    if (missingTables.length > 0) {
-      const errorMsg = `❌ Critical tables missing: ${missingTables.join(', ')}`;
-      console.error(`\n${errorMsg}`);
-      
-      // In production, log but don't crash - let the app try to run
-      if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL) {
-        console.error('⚠️  Production mode: Continuing despite missing tables. Check schema.sql!');
-        console.log('\n✅ Database connection established (with warnings)');
-        return true;
-      } else {
-        // In development, fail fast
-        throw new Error(errorMsg);
-      }
-    }
-    
     console.log('\n✅ Database schema initialized successfully');
     return true;
   } catch (error) {
@@ -435,10 +466,117 @@ const init = async () => {
     if (error.code) {
       console.error(`   Error code: ${error.code}`);
     }
-    if (error.stack) {
-      console.error('Stack trace:', error.stack);
-    }
     throw error;
+  }
+};
+
+/**
+ * Seed sample problems
+ */
+const seedProblems = async (dbPool) => {
+  const problems = [
+    {
+      title: 'Two Sum',
+      description: 'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.',
+      difficulty: 'easy',
+      test_cases: JSON.stringify([
+        {"input": {"nums": [2,7,11,15], "target": 9}},
+        {"input": {"nums": [3,2,4], "target": 6}},
+        {"input": {"nums": [3,3], "target": 6}}
+      ]),
+      expected_outputs: JSON.stringify([
+        {"output": [0,1]},
+        {"output": [1,2]},
+        {"output": [0,1]}
+      ]),
+      constraints: '2 <= nums.length <= 104',
+      examples: JSON.stringify([
+        {"input": {"nums": [2,7,11,15], "target": 9}, "output": [0,1], "explanation": "Because nums[0] + nums[1] == 9, we return [0, 1]."}
+      ])
+    },
+    {
+      title: 'Reverse String',
+      description: 'Write a function that reverses a string. The input string is given as an array of characters s.',
+      difficulty: 'easy',
+      test_cases: JSON.stringify([
+        {"input": {"s": ["h","e","l","l","o"]}},
+        {"input": {"s": ["H","a","n","n","a","h"]}}
+      ]),
+      expected_outputs: JSON.stringify([
+        {"output": ["o","l","l","e","h"]},
+        {"output": ["h","a","n","n","a","H"]}
+      ]),
+      constraints: '1 <= s.length <= 105',
+      examples: JSON.stringify([
+        {"input": {"s": ["h","e","l","l","o"]}, "output": ["o","l","l","e","h"], "explanation": "Reverse the characters in the array."}
+      ])
+    },
+    {
+      title: 'Valid Palindrome',
+      description: 'A phrase is a palindrome if it reads the same forward and backward. Given a string s, return true if it is a palindrome.',
+      difficulty: 'easy',
+      test_cases: JSON.stringify([
+        {"input": {"s": "A man, a plan, a canal: Panama"}},
+        {"input": {"s": "race a car"}}
+      ]),
+      expected_outputs: JSON.stringify([
+        {"output": true},
+        {"output": false}
+      ]),
+      constraints: '1 <= s.length <= 2 * 105',
+      examples: JSON.stringify([
+        {"input": {"s": "A man, a plan, a canal: Panama"}, "output": true, "explanation": "amanaplanacanalpanama is a palindrome."}
+      ])
+    },
+    {
+      title: 'Maximum Subarray',
+      description: 'Given an integer array nums, find the subarray with the largest sum, and return its sum.',
+      difficulty: 'medium',
+      test_cases: JSON.stringify([
+        {"input": {"nums": [-2,1,-3,4,-1,2,1,-5,4]}},
+        {"input": {"nums": [1]}},
+        {"input": {"nums": [5,4,-1,7,8]}}
+      ]),
+      expected_outputs: JSON.stringify([
+        {"output": 6},
+        {"output": 1},
+        {"output": 23}
+      ]),
+      constraints: '1 <= nums.length <= 105',
+      examples: JSON.stringify([
+        {"input": {"nums": [-2,1,-3,4,-1,2,1,-5,4]}, "output": 6, "explanation": "The subarray [4,-1,2,1] has the largest sum 6."}
+      ])
+    },
+    {
+      title: 'Merge Intervals',
+      description: 'Given an array of intervals, merge all overlapping intervals.',
+      difficulty: 'medium',
+      test_cases: JSON.stringify([
+        {"input": {"intervals": [[1,3],[2,6],[8,10],[15,18]]}},
+        {"input": {"intervals": [[1,4],[4,5]]}}
+      ]),
+      expected_outputs: JSON.stringify([
+        {"output": [[1,6],[8,10],[15,18]]},
+        {"output": [[1,5]]}
+      ]),
+      constraints: '1 <= intervals.length <= 104',
+      examples: JSON.stringify([
+        {"input": {"intervals": [[1,3],[2,6],[8,10],[15,18]]}, "output": [[1,6],[8,10],[15,18]], "explanation": "Intervals [1,3] and [2,6] overlap, merge them into [1,6]."}
+      ])
+    }
+  ];
+
+  for (const problem of problems) {
+    try {
+      await dbPool.query(
+        `INSERT INTO problems (title, description, difficulty, test_cases, expected_outputs, constraints, examples)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT DO NOTHING`,
+        [problem.title, problem.description, problem.difficulty, problem.test_cases, problem.expected_outputs, problem.constraints, problem.examples]
+      );
+    } catch (e) {
+      // Ignore duplicate errors
+    }
   }
 };
 
