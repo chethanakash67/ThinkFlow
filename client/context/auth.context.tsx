@@ -58,14 +58,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string) => {
-    const response = await api.post('/auth/signin', { email, password })
-    
-    if (response.data.success && response.data.token) {
-      setToken(response.data.token)
-      setUser(response.data.user)
-      router.push('/dashboard')
-    } else {
-      throw new Error(response.data.error || 'Login failed')
+    try {
+      const response = await api.post('/auth/signin', { email, password })
+      
+      if (response.data.success && response.data.token) {
+        setToken(response.data.token)
+        setUser(response.data.user)
+        // Small delay to ensure state is updated before navigation
+        await new Promise(resolve => setTimeout(resolve, 100))
+        router.push('/dashboard')
+      } else {
+        throw new Error(response.data.error || 'Login failed')
+      }
+    } catch (err: any) {
+      // Re-throw with better error messages
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        throw new Error('Request timed out. The server may be starting up. Please try again.')
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        throw new Error('Cannot connect to server. Please check your internet connection.')
+      }
+      throw err
     }
   }
 

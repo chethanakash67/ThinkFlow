@@ -1,7 +1,7 @@
 'use client';
 
 import './login.css';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useAuth } from '@/context/auth.context';
@@ -15,6 +15,29 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Signing in...');
+
+  // Update loading message for long requests (Render cold start)
+  useEffect(() => {
+    let timer1: NodeJS.Timeout;
+    let timer2: NodeJS.Timeout;
+    
+    if (loading) {
+      timer1 = setTimeout(() => {
+        setLoadingMessage('Server is waking up, please wait...');
+      }, 5000);
+      timer2 = setTimeout(() => {
+        setLoadingMessage('Almost there, just a few more seconds...');
+      }, 15000);
+    } else {
+      setLoadingMessage('Signing in...');
+    }
+    
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+    };
+  }, [loading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,7 +208,7 @@ export default function LoginPage() {
           </div>
 
           <button type="submit" disabled={loading} className="submit-button">
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? loadingMessage : 'Sign In'}
           </button>
         </form>
       </div>

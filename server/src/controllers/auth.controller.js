@@ -52,9 +52,9 @@ const getTransporter = () => {
       user: smtpUser,
       pass: smtpPass,
     },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
+    connectionTimeout: 30000, // 30 seconds for production
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
   });
 
   console.log(`✅ Email transporter configured: ${smtpHost}:${smtpPort}`);

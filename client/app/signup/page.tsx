@@ -1,7 +1,7 @@
 'use client';
 
 import './signup.css';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import api from '@/lib/api';
@@ -18,6 +18,29 @@ export default function SignUpPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Creating account...');
+
+  // Update loading message for long requests (Render cold start)
+  useEffect(() => {
+    let timer1: NodeJS.Timeout;
+    let timer2: NodeJS.Timeout;
+    
+    if (loading) {
+      timer1 = setTimeout(() => {
+        setLoadingMessage('Server is waking up, please wait...');
+      }, 5000);
+      timer2 = setTimeout(() => {
+        setLoadingMessage('Almost there, just a few more seconds...');
+      }, 15000);
+    } else {
+      setLoadingMessage('Creating account...');
+    }
+    
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+    };
+  }, [loading]);
 
   const passwordRequirements = {
     length: formData.password.length >= 8,
@@ -72,7 +95,14 @@ export default function SignUpPage() {
       }
     } catch (err: any) {
       console.error('Signup error:', err);
-      setError(err.response?.data?.error || 'Signup failed. Please try again.');
+      // Handle different error types
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Request timed out. The server may be starting up. Please try again in a moment.');
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('Cannot connect to server. Please check your internet connection and try again.');
+      } else {
+        setError(err.response?.data?.error || 'Signup failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -309,7 +339,7 @@ export default function SignUpPage() {
           </div>
 
           <button type="submit" disabled={loading} className="submit-button">
-            {loading ? 'Creating Account...' : 'Create Account'}
+            {loading ? loadingMessage : 'Create Account'}
           </button>
         </form>
       </div>

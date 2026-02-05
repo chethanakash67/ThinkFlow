@@ -1,16 +1,21 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+// Production API URL - Update this to your Render backend URL
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
+    ? 'https://thinkflow-6t7n.onrender.com/api'  // Replace with your actual Render URL
+    : 'http://localhost:3001/api');
 
 console.log('API URL configured:', API_URL);
+console.log('Environment:', typeof window !== 'undefined' ? window.location.hostname : 'server');
 
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 second timeout
+  timeout: 60000, // 60 second timeout for Render cold starts
 });
 
 // Add token to requests
