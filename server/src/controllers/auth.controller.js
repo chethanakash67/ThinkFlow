@@ -7,6 +7,7 @@ const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 /**
  * Generate 6-digit OTP
@@ -65,14 +66,6 @@ const getTransporter = () => {
  * Send OTP email
  */
 const sendOTPEmail = async (email, otp, type) => {
-  const transporter = getTransporter();
-  
-  if (!transporter) {
-    throw new Error('Email service not configured. Please set SMTP environment variables.');
-  }
-
-  const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_USER;
-  
   const subject = type === 'signup' 
     ? 'Verify your ThinkFlow account' 
     : 'Reset your ThinkFlow password';
@@ -101,30 +94,57 @@ const sendOTPEmail = async (email, otp, type) => {
       </div>
     `;
 
+  // Method 1: Use Resend (HTTP API - works on Render free tier)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      console.log(`📧 Sending ${type} OTP via Resend to ${email}...`);
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const fromEmail = process.env.RESEND_FROM || 'ThinkFlow <onboarding@resend.dev>';
+      const { data, error } = await resend.emails.send({
+        from: fromEmail,
+        to: [email],
+        subject,
+        html,
+      });
+      if (error) {
+        console.error('❌ Resend error:', error);
+        throw new Error(`Resend error: ${error.message}`);
+      }
+      console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
+      return true;
+    } catch (resendError) {
+      console.error('❌ Resend failed:', resendError.message);
+      // Don't fall through to SMTP — if Resend is configured, use only Resend
+      throw new Error(`Email send failed: ${resendError.message}`);
+    }
+  }
+
+  // Method 2: Use SMTP (nodemailer - may not work on Render free tier)
+  const transporter = getTransporter();
+  
+  if (!transporter) {
+    throw new Error('Email service not configured. Set RESEND_API_KEY or SMTP environment variables.');
+  }
+
+  const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_USER;
+
   try {
-    console.log(`📧 Sending ${type} OTP email to ${email}...`);
+    console.log(`📧 Sending ${type} OTP via SMTP to ${email}...`);
     const info = await transporter.sendMail({
       from: `"ThinkFlow" <${emailFrom}>`,
       to: email,
       subject,
       html,
     });
-    console.log(`✅ OTP email sent successfully!`);
+    console.log(`✅ OTP email sent via SMTP!`);
     console.log(`📬 Message ID: ${info.messageId}`);
     return true;
   } catch (error) {
-    console.error('❌ Failed to send OTP email:');
-    console.error('  Error:', error.message);
-    console.error('  Code:', error.code);
-    console.error('  Command:', error.command);
-    
-    // Provide more specific error messages
+    console.error('❌ SMTP send failed:', error.message, error.code);
     if (error.code === 'EAUTH') {
-      throw new Error('Email authentication failed. Check SMTP_USER and SMTP_PASS in .env file.');
-    } else if (error.code === 'ECONNECTION' || error.code === 'ESOCKET') {
-      throw new Error('Cannot connect to email server. Check SMTP_HOST and SMTP_PORT.');
-    } else if (error.code === 'ETIMEDOUT') {
-      throw new Error('Email server connection timed out. Try again later.');
+      throw new Error('Email authentication failed. Check SMTP_USER and SMTP_PASS.');
+    } else if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKET' || error.code === 'ECONNECTION') {
+      throw new Error('Email server connection timed out. SMTP may be blocked on this host.');
     } else {
       throw new Error(`Email error: ${error.message}`);
     }
