@@ -636,20 +636,23 @@ const forgotPassword = async (req, res) => {
     // Send OTP email
     try {
       await sendOTPEmail(normalizedEmail, otpCode, 'forgot-password');
+      console.log(`✅ Password reset code sent\n`);
+
+      return res.json({ 
+        success: true,
+        message: 'If this email is registered, a reset code has been sent'
+      });
     } catch (emailError) {
+      // Log the detailed error for debugging, but don't expose it to the client.
       console.error(`\n❌ Email send failed:`, emailError.message);
-      return res.status(500).json({
-        success: false,
-        error: `Unable to send reset code: ${emailError.message}`,
+      // Avoid returning 500 to the client. Return the same generic success message so
+      // callers cannot detect whether the email delivery failed (prevents enumeration)
+      // and so the UI doesn't break when SMTP is blocked on the host (eg: Render free tier).
+      return res.json({ 
+        success: true,
+        message: 'If this email is registered, a reset code has been sent'
       });
     }
-
-    console.log(`✅ Password reset code sent\n`);
-
-    res.json({ 
-      success: true,
-      message: 'If this email is registered, a reset code has been sent'
-    });
   } catch (error) {
     console.error('\n❌ Password reset request error:', error.message);
     res.status(500).json({ 
