@@ -30,8 +30,14 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       Cookies.remove('token');
+      // Only redirect to login if we're on a protected page (not already on auth pages)
+      // This prevents redirect loops on login/signup/verify-otp pages
       if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+        const path = window.location.pathname;
+        const authPages = ['/login', '/signup', '/verify-otp', '/forgot-password', '/'];
+        if (!authPages.some(p => path.startsWith(p) || path === p)) {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);

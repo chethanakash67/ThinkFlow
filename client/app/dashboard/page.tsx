@@ -4,13 +4,14 @@ import './dashboard.css';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
-import { getCurrentUser } from '@/lib/auth';
+import { useAuth } from '@/context/auth.context';
 import api from '@/lib/api';
 import { FaFileAlt, FaCheckCircle, FaBullseye, FaInbox } from 'react-icons/fa';
 import Image from 'next/image';
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { user: authUser, logout } = useAuth();
   const [user, setUser] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
   const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
@@ -19,8 +20,10 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const userData = await getCurrentUser();
-        setUser(userData);
+        // Use user from auth context first, fall back to API call
+        if (authUser) {
+          setUser(authUser);
+        }
 
         const statsResponse = await api.get('/submissions/dashboard');
         setStats(statsResponse.data.stats);
@@ -33,11 +36,10 @@ export default function DashboardPage() {
     };
 
     fetchData();
-  }, []);
+  }, [authUser]);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    router.push('/login');
+    logout();
   };
 
   const formatDate = (dateString: string) => {

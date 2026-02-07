@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import api from '@/lib/api';
 import { setToken } from '@/lib/auth';
+import { useAuth } from '@/context/auth.context';
 
 export default function SignUpPage() {
   const router = useRouter();
+  const { refreshUser } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -83,6 +85,8 @@ export default function SignUpPage() {
         if (response.data.autoVerified && response.data.token) {
           // Save token using the shared auth helper (sets cookie properly)
           setToken(response.data.token);
+          // Refresh auth context so ProtectedRoute sees the user
+          await refreshUser();
           // Redirect to dashboard
           router.push('/dashboard');
         } else {

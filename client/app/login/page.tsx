@@ -47,7 +47,9 @@ export default function LoginPage() {
     try {
       await login(email, password);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please check your credentials and try again.');
+      // Handle errors from auth context (thrown as Error) and axios (with .response)
+      const message = err.response?.data?.error || err.message || 'Login failed. Please check your credentials and try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }

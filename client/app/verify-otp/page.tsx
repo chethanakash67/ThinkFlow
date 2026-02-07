@@ -6,9 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import api from '@/lib/api';
 import { setToken } from '@/lib/auth';
+import { useAuth } from '@/context/auth.context';
 
 function VerifyOTPContent() {
   const router = useRouter();
+  const { refreshUser } = useAuth();
   const searchParams = useSearchParams();
   const email = searchParams.get('email');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -73,6 +75,7 @@ function VerifyOTPContent() {
       // If server returns token, save it and go to dashboard
       if (response.data.token) {
         setToken(response.data.token);
+        await refreshUser();
         setTimeout(() => router.push('/dashboard'), 1500);
       } else {
         // Otherwise redirect to login
