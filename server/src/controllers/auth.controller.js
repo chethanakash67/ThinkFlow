@@ -640,17 +640,19 @@ const forgotPassword = async (req, res) => {
 
       return res.json({ 
         success: true,
-        message: 'If this email is registered, a reset code has been sent'
+        emailSent: true,
+        message: 'Password reset code sent to your email'
       });
     } catch (emailError) {
-      // Log the detailed error for debugging, but don't expose it to the client.
+      // Log the detailed error for debugging
       console.error(`\n❌ Email send failed:`, emailError.message);
-      // Avoid returning 500 to the client. Return the same generic success message so
-      // callers cannot detect whether the email delivery failed (prevents enumeration)
-      // and so the UI doesn't break when SMTP is blocked on the host (eg: Render free tier).
-      return res.json({ 
-        success: true,
-        message: 'If this email is registered, a reset code has been sent'
+      // Return success: false with a user-friendly error so the UI doesn't advance to OTP step
+      // This is important - we need to tell the user the email couldn't be sent
+      return res.status(503).json({ 
+        success: false,
+        emailSent: false,
+        error: 'Unable to send email. Please try again later or contact support.',
+        details: process.env.NODE_ENV === 'development' ? emailError.message : undefined
       });
     }
   } catch (error) {
