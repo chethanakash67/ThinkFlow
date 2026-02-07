@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import api from '@/lib/api';
+import { setToken } from '@/lib/auth';
 
 function VerifyOTPContent() {
   const router = useRouter();
@@ -71,10 +72,7 @@ function VerifyOTPContent() {
       
       // If server returns token, save it and go to dashboard
       if (response.data.token) {
-        document.cookie = `token=${response.data.token}; path=/; max-age=${7 * 24 * 60 * 60}`;
-        if (response.data.user) {
-          localStorage.setItem('user', JSON.stringify(response.data.user));
-        }
+        setToken(response.data.token);
         setTimeout(() => router.push('/dashboard'), 1500);
       } else {
         // Otherwise redirect to login

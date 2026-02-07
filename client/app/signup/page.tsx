@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import api from '@/lib/api';
+import { setToken } from '@/lib/auth';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -80,9 +81,8 @@ export default function SignUpPage() {
       if (response.data.success) {
         // Check if user was auto-verified (SMTP not configured or email failed)
         if (response.data.autoVerified && response.data.token) {
-          // Save token to cookie
-          document.cookie = `token=${response.data.token}; path=/; max-age=${7 * 24 * 60 * 60}`;
-          localStorage.setItem('user', JSON.stringify(response.data.user));
+          // Save token using the shared auth helper (sets cookie properly)
+          setToken(response.data.token);
           // Redirect to dashboard
           router.push('/dashboard');
         } else {
