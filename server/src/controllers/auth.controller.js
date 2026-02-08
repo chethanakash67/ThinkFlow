@@ -234,33 +234,19 @@ const signup = async (req, res) => {
       });
     }
 
-    // Check if SMTP is configured
+    // Check if email service is configured (Resend or SMTP)
+    const resendConfigured = !!process.env.RESEND_API_KEY;
     const smtpConfigured = process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_HOST;
-    console.log(`  📧 SMTP configured: ${smtpConfigured ? 'Yes' : 'No'}`);
+    const emailConfigured = resendConfigured || smtpConfigured;
+    
+    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (Resend: ${resendConfigured}, SMTP: ${smtpConfigured})`);
 
-    if (!smtpConfigured) {
-      // Auto-verify user when SMTP is not configured
-      console.log(`  ℹ️  SMTP not configured - auto-verifying user`);
-      
-      await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
-      
-      const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
-      const user = userResult.rows[0];
-      const token = generateToken(user.id);
-      
-      console.log(`✅ User auto-verified (SMTP not configured)\n`);
-      
-      return res.json({
-        success: true,
-        message: 'Account created successfully!',
-        autoVerified: true,
-        token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        }
+    if (!emailConfigured) {
+      // No email service configured - return error, don't auto-verify
+      console.log(`  ❌ No email service configured - cannot send OTP`);
+      return res.status(503).json({
+        success: false,
+        error: 'Email service not configured. Please contact support.'
       });
     }
 
@@ -268,36 +254,21 @@ const signup = async (req, res) => {
     try {
       await sendOTPEmail(normalizedEmail, otpCode, 'signup');
       console.log(`✅ OTP email sent to ${normalizedEmail}\n`);
-    } catch (emailError) {
-      console.error(`\n⚠️  EMAIL SEND FAILED:`, emailError.message);
       
-      // Email failed - auto-verify the user so they can still use the app
-      console.log(`  ℹ️  Email failed - auto-verifying user`);
-      
-      await query('UPDATE users SET email_verified = TRUE, otp_code = NULL WHERE email = $1', [normalizedEmail]);
-      
-      const userResult = await query('SELECT id, name, email, role FROM users WHERE email = $1', [normalizedEmail]);
-      const user = userResult.rows[0];
-      const token = generateToken(user.id);
-      
-      return res.json({
+      res.json({
         success: true,
-        message: 'Account created successfully!',
-        autoVerified: true,
-        token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        }
+        message: 'Verification code sent to your email. Please check your inbox (and spam folder).',
+      });
+    } catch (emailError) {
+      console.error(`\n❌ EMAIL SEND FAILED:`, emailError.message);
+      
+      // Email failed - return error, don't auto-verify
+      return res.status(503).json({
+        success: false,
+        error: 'Unable to send verification email. Please try again later.',
+        details: process.env.NODE_ENV === 'development' ? emailError.message : undefined
       });
     }
-
-    res.json({
-      success: true,
-      message: 'Verification code sent to your email. Please check your inbox (and spam folder).',
-    });
   } catch (error) {
     console.error('\n❌ Signup error:', error.message);
     console.error('Stack:', error.stack);

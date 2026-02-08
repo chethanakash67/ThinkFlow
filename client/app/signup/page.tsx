@@ -81,18 +81,8 @@ export default function SignUpPage() {
       console.log('Signup response:', response.data);
 
       if (response.data.success) {
-        // Check if user was auto-verified (SMTP not configured or email failed)
-        if (response.data.autoVerified && response.data.token) {
-          // Save token using the shared auth helper (sets cookie properly)
-          setToken(response.data.token);
-          // Refresh auth context so ProtectedRoute sees the user
-          await refreshUser();
-          // Redirect to dashboard
-          router.push('/dashboard');
-        } else {
-          // Normal OTP flow - redirect to verify-otp page
-          router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
-        }
+        // OTP sent successfully - redirect to verify-otp page
+        router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
       } else {
         // Show error message from server
         setError(response.data.error || 'Signup failed. Please try again.');
