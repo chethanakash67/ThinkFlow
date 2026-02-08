@@ -94,7 +94,7 @@ const sendOTPEmail = async (email, otp, type) => {
       </div>
     `;
 
-  // Method 1: Use Resend (HTTP API - works on Render free tier)
+  // Method 1: Try Resend (HTTP API - works on Render free tier)
   if (process.env.RESEND_API_KEY) {
     try {
       console.log(`📧 Sending ${type} OTP via Resend to ${email}...`);
@@ -108,18 +108,20 @@ const sendOTPEmail = async (email, otp, type) => {
       });
       if (error) {
         console.error('❌ Resend error:', error);
-        throw new Error(`Resend error: ${error.message}`);
+        // Fall through to SMTP if Resend fails (e.g., free tier email restrictions)
+        console.log('  ⚠️ Trying SMTP fallback...');
+      } else {
+        console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
+        return true;
       }
-      console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
-      return true;
     } catch (resendError) {
       console.error('❌ Resend failed:', resendError.message);
-      // Don't fall through to SMTP — if Resend is configured, use only Resend
-      throw new Error(`Email send failed: ${resendError.message}`);
+      console.log('  ⚠️ Trying SMTP fallback...');
+      // Fall through to SMTP
     }
   }
 
-  // Method 2: Use SMTP (nodemailer - may not work on Render free tier)
+  // Method 2: Use SMTP (nodemailer - fallback or primary if no Resend key)
   const transporter = getTransporter();
   
   if (!transporter) {

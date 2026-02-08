@@ -100,7 +100,7 @@ export default function ForgotPasswordPage() {
 
     try {
       const otpString = otp.join('');
-      await api.post('/auth/reset-password', { email, otp: otpString, newPassword });
+      await api.post('/auth/reset-password', { email, otp: otpString, password: newPassword });
       setSuccess('Password reset successfully!');
       setTimeout(() => router.push('/login'), 2000);
     } catch (err: any) {
