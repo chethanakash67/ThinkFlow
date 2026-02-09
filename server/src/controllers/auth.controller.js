@@ -62,6 +62,9 @@ const getTransporter = () => {
   return transporter;
 };
 
+const hasSmtpConfig = () =>
+  !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
 /**
  * Send OTP email
  */
@@ -94,12 +97,18 @@ const sendOTPEmail = async (email, otp, type) => {
       </div>
     `;
 
+  const resendConfigured = !!process.env.RESEND_API_KEY;
+  const smtpConfigured = hasSmtpConfig();
+
   // Method 1: Try Resend (HTTP API - works on Render free tier)
-  if (process.env.RESEND_API_KEY) {
+  if (resendConfigured) {
     try {
       console.log(`📧 Sending ${type} OTP via Resend to ${email}...`);
       const resend = new Resend(process.env.RESEND_API_KEY);
       const fromEmail = process.env.RESEND_FROM || 'ThinkFlow <onboarding@resend.dev>';
+      if (!process.env.RESEND_FROM) {
+        console.log('  ⚠️ RESEND_FROM not set, using default onboarding sender');
+      }
       const { data, error } = await resend.emails.send({
         from: fromEmail,
         to: [email],
@@ -108,22 +117,29 @@ const sendOTPEmail = async (email, otp, type) => {
       });
       if (error) {
         console.error('❌ Resend error:', error);
-        // Fall through to SMTP if Resend fails (e.g., free tier email restrictions)
-        console.log('  ⚠️ Trying SMTP fallback...');
+        if (smtpConfigured) {
+          // Fall through to SMTP if Resend fails and SMTP is available
+          console.log('  ⚠️ Trying SMTP fallback...');
+        } else {
+          throw new Error(`Resend failed and SMTP not configured: ${error.message || 'unknown error'}`);
+        }
       } else {
         console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
         return true;
       }
     } catch (resendError) {
       console.error('❌ Resend failed:', resendError.message);
-      console.log('  ⚠️ Trying SMTP fallback...');
-      // Fall through to SMTP
+      if (smtpConfigured) {
+        console.log('  ⚠️ Trying SMTP fallback...');
+        // Fall through to SMTP
+      } else {
+        throw new Error(`Resend failed and SMTP not configured: ${resendError.message}`);
+      }
     }
   }
 
   // Method 2: Use SMTP (nodemailer - fallback or primary if no Resend key)
   const transporter = getTransporter();
-  
   if (!transporter) {
     throw new Error('Email service not configured. Set RESEND_API_KEY or SMTP environment variables.');
   }
