@@ -121,7 +121,10 @@ const sendOTPEmail = async (email, otp, type) => {
           // Fall through to SMTP if Resend fails and SMTP is available
           console.log('  ⚠️ Trying SMTP fallback...');
         } else {
-          throw new Error(`Resend failed and SMTP not configured: ${error.message || 'unknown error'}`);
+          throw new Error(
+            `Resend failed and SMTP not configured: ${error.message || 'unknown error'}. ` +
+            `Set RESEND_FROM to a verified sender/domain or configure SMTP.`
+          );
         }
       } else {
         console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
@@ -133,7 +136,10 @@ const sendOTPEmail = async (email, otp, type) => {
         console.log('  ⚠️ Trying SMTP fallback...');
         // Fall through to SMTP
       } else {
-        throw new Error(`Resend failed and SMTP not configured: ${resendError.message}`);
+        throw new Error(
+          `Resend failed and SMTP not configured: ${resendError.message}. ` +
+          `Set RESEND_FROM to a verified sender/domain or configure SMTP.`
+        );
       }
     }
   }
