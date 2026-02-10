@@ -99,9 +99,16 @@ const sendOTPEmail = async (email, otp, type) => {
 
   const resendConfigured = !!process.env.RESEND_API_KEY;
   const smtpConfigured = hasSmtpConfig();
+  const emailProvider = (process.env.EMAIL_PROVIDER || (resendConfigured ? 'resend' : 'smtp'))
+    .toLowerCase();
+  console.log(`📧 Email provider selected: ${emailProvider}`);
+
+  if (!['resend', 'smtp'].includes(emailProvider)) {
+    throw new Error('Invalid EMAIL_PROVIDER. Use "resend" or "smtp".');
+  }
 
   // Method 1: Try Resend (HTTP API - works on Render free tier)
-  if (resendConfigured) {
+  if (emailProvider === 'resend' && resendConfigured) {
     try {
       console.log(`📧 Sending ${type} OTP via Resend to ${email}...`);
       const resend = new Resend(process.env.RESEND_API_KEY);
@@ -144,7 +151,7 @@ const sendOTPEmail = async (email, otp, type) => {
     }
   }
 
-  // Method 2: Use SMTP (nodemailer - fallback or primary if no Resend key)
+  // Method 2: Use SMTP (fallback or primary if selected)
   const transporter = getTransporter();
   if (!transporter) {
     throw new Error('Email service not configured. Set RESEND_API_KEY or SMTP environment variables.');
