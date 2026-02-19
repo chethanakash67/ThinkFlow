@@ -15,14 +15,15 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = [
   'http://localhost:3000',
   'https://think-flow-tau.vercel.app',
+  'https://think-and-code-in-a-flow.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, curl, etc)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -51,8 +52,8 @@ app.get('/health', (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
-  res.status(500).json({ 
-    success: false, 
+  res.status(500).json({
+    success: false,
     message: 'Internal server error',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
@@ -71,7 +72,7 @@ async function startServer() {
       console.log(`📧 SMTP: ${process.env.SMTP_USER ? '✓ Configured' : '✗ Not configured'}`);
       console.log(`🔐 JWT: ${process.env.JWT_SECRET ? '✓ Configured' : '✗ Not configured'}`);
       console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here' ? '✓ Configured' : '⚠️  NOT CONFIGURED'}`);
-      
+
       if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
         console.log('');
         console.log('⚠️  WARNING: Gemini API Key not configured!');
@@ -79,7 +80,7 @@ async function startServer() {
         console.log('   📖 See GEMINI_SETUP.md for instructions');
         console.log('   🔗 Get free API key: https://makersuite.google.com/app/apikey');
       }
-      
+
       console.log(`📊 Node: ${process.version}`);
       console.log('━'.repeat(60));
       console.log(`✅ Ready to accept connections`);
