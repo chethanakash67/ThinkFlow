@@ -7,7 +7,7 @@ const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
-const nodemailer = require('nodemailer');
+
 
 const { sendOTPEmail } = require('../services/emailService');
 
