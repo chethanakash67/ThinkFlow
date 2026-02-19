@@ -30,6 +30,10 @@ const createTransporter = () => {
     pool: true, // use pooled connections
     maxConnections: 5, // max connections
     maxMessages: 100, // max messages per connection
+    // timeouts
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000, // 10 seconds
+    socketTimeout: 10000, // 10 seconds
     // debug options
     debug: process.env.NODE_ENV !== 'production',
     logger: process.env.NODE_ENV !== 'production'
