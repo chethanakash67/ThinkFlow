@@ -7,179 +7,15 @@ const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
+
+const { sendOTPEmail } = require('../services/emailService');
 
 /**
  * Generate 6-digit OTP
  */
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-/**
- * Initialize email transporter
- * Logs clear errors if configuration is missing
- */
-const getTransporter = () => {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const emailFrom = process.env.EMAIL_FROM || smtpUser;
-
-  console.log('📧 Email configuration check:');
-  console.log(`  SMTP_HOST: ${smtpHost ? '✅ Set' : '❌ Missing'}`);
-  console.log(`  SMTP_PORT: ${smtpPort ? `✅ ${smtpPort}` : '❌ Missing'}`);
-  console.log(`  SMTP_USER: ${smtpUser ? '✅ Set' : '❌ Missing'}`);
-  console.log(`  SMTP_PASS: ${smtpPass ? '✅ Set' : '❌ Missing'}`);
-  console.log(`  EMAIL_FROM: ${emailFrom ? `✅ ${emailFrom}` : '❌ Missing'}`);
-
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    console.error('❌ Email configuration incomplete!');
-    console.error('Required environment variables:');
-    console.error('  SMTP_HOST (required)');
-    console.error('  SMTP_PORT (optional, defaults to 587)');
-    console.error('  SMTP_USER (required)');
-    console.error('  SMTP_PASS (required)');
-    console.error('  EMAIL_FROM (optional, defaults to SMTP_USER)');
-    return null;
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-    connectionTimeout: 30000, // 30 seconds for production
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-  });
-
-  console.log(`✅ Email transporter configured: ${smtpHost}:${smtpPort}`);
-  return transporter;
-};
-
-const hasSmtpConfig = () =>
-  !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-
-/**
- * Send OTP email
- */
-const sendOTPEmail = async (email, otp, type) => {
-  const subject = type === 'signup' 
-    ? 'Verify your ThinkFlow account' 
-    : 'Reset your ThinkFlow password';
-  
-  const html = type === 'signup'
-    ? `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #4f46e5;">Welcome to ThinkFlow!</h2>
-        <p style="font-size: 16px;">Your verification code is:</p>
-        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <h1 style="font-size: 48px; color: #4f46e5; letter-spacing: 10px; margin: 0;">${otp}</h1>
-        </div>
-        <p style="color: #666;">This code will expire in 10 minutes.</p>
-        <p style="color: #999; font-size: 14px;">If you didn't create an account, please ignore this email.</p>
-      </div>
-    `
-    : `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #4f46e5;">Password Reset Request</h2>
-        <p style="font-size: 16px;">Your password reset code is:</p>
-        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <h1 style="font-size: 48px; color: #4f46e5; letter-spacing: 10px; margin: 0;">${otp}</h1>
-        </div>
-        <p style="color: #666;">This code will expire in 10 minutes.</p>
-        <p style="color: #999; font-size: 14px;">If you didn't request a password reset, please ignore this email.</p>
-      </div>
-    `;
-
-  const resendConfigured = !!process.env.RESEND_API_KEY;
-  const smtpConfigured = hasSmtpConfig();
-  const emailProvider = (process.env.EMAIL_PROVIDER || (resendConfigured ? 'resend' : 'smtp'))
-    .toLowerCase();
-  console.log(`📧 Email provider selected: ${emailProvider}`);
-
-  if (!['resend', 'smtp'].includes(emailProvider)) {
-    throw new Error('Invalid EMAIL_PROVIDER. Use "resend" or "smtp".');
-  }
-
-  // Method 1: Try Resend (HTTP API - works on Render free tier)
-  if (emailProvider === 'resend' && resendConfigured) {
-    try {
-      console.log(`📧 Sending ${type} OTP via Resend to ${email}...`);
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      const fromEmail = process.env.RESEND_FROM || 'ThinkFlow <onboarding@resend.dev>';
-      if (!process.env.RESEND_FROM) {
-        console.log('  ⚠️ RESEND_FROM not set, using default onboarding sender');
-      }
-      const { data, error } = await resend.emails.send({
-        from: fromEmail,
-        to: [email],
-        subject,
-        html,
-      });
-      if (error) {
-        console.error('❌ Resend error:', error);
-        if (smtpConfigured) {
-          // Fall through to SMTP if Resend fails and SMTP is available
-          console.log('  ⚠️ Trying SMTP fallback...');
-        } else {
-          throw new Error(
-            `Resend failed and SMTP not configured: ${error.message || 'unknown error'}. ` +
-            `Set RESEND_FROM to a verified sender/domain or configure SMTP.`
-          );
-        }
-      } else {
-        console.log(`✅ OTP email sent via Resend! ID: ${data.id}`);
-        return true;
-      }
-    } catch (resendError) {
-      console.error('❌ Resend failed:', resendError.message);
-      if (smtpConfigured) {
-        console.log('  ⚠️ Trying SMTP fallback...');
-        // Fall through to SMTP
-      } else {
-        throw new Error(
-          `Resend failed and SMTP not configured: ${resendError.message}. ` +
-          `Set RESEND_FROM to a verified sender/domain or configure SMTP.`
-        );
-      }
-    }
-  }
-
-  // Method 2: Use SMTP (fallback or primary if selected)
-  const transporter = getTransporter();
-  if (!transporter) {
-    throw new Error('Email service not configured. Set RESEND_API_KEY or SMTP environment variables.');
-  }
-
-  const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_USER;
-
-  try {
-    console.log(`📧 Sending ${type} OTP via SMTP to ${email}...`);
-    const info = await transporter.sendMail({
-      from: `"ThinkFlow" <${emailFrom}>`,
-      to: email,
-      subject,
-      html,
-    });
-    console.log(`✅ OTP email sent via SMTP!`);
-    console.log(`📬 Message ID: ${info.messageId}`);
-    return true;
-  } catch (error) {
-    console.error('❌ SMTP send failed:', error.message, error.code);
-    if (error.code === 'EAUTH') {
-      throw new Error('Email authentication failed. Check SMTP_USER and SMTP_PASS.');
-    } else if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKET' || error.code === 'ECONNECTION') {
-      throw new Error('Email server connection timed out. SMTP may be blocked on this host.');
-    } else {
-      throw new Error(`Email error: ${error.message}`);
-    }
-  }
 };
 
 /**
@@ -190,7 +26,7 @@ const signup = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         error: errors.array()[0].msg || 'Validation failed'
       });
@@ -217,7 +53,7 @@ const signup = async (req, res) => {
 
     if (existingUser.rows.length > 0) {
       if (existingUser.rows[0].email_verified) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           success: false,
           error: 'Email already registered. Please login instead.'
         });
@@ -233,7 +69,7 @@ const signup = async (req, res) => {
     // Generate OTP
     const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-    
+
     console.log(`  🔐 Generated OTP: ${otpCode}`);
     console.log(`  ⏰ Expires: ${otpExpires.toLocaleString()}`);
 
@@ -269,7 +105,7 @@ const signup = async (req, res) => {
     const resendConfigured = !!process.env.RESEND_API_KEY;
     const smtpConfigured = process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_HOST;
     const emailConfigured = resendConfigured || smtpConfigured;
-    
+
     console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (Resend: ${resendConfigured}, SMTP: ${smtpConfigured})`);
 
     if (!emailConfigured) {
@@ -285,14 +121,14 @@ const signup = async (req, res) => {
     try {
       await sendOTPEmail(normalizedEmail, otpCode, 'signup');
       console.log(`✅ OTP email sent to ${normalizedEmail}\n`);
-      
+
       res.json({
         success: true,
         message: 'Verification code sent to your email. Please check your inbox (and spam folder).',
       });
     } catch (emailError) {
       console.error(`\n❌ EMAIL SEND FAILED:`, emailError.message);
-      
+
       // Email failed - return error, don't auto-verify
       return res.status(503).json({
         success: false,
@@ -305,10 +141,10 @@ const signup = async (req, res) => {
     console.error('Stack:', error.stack);
     console.error('Error code:', error.code);
     console.error('Error detail:', error.detail);
-    
+
     // Provide detailed error messages for debugging
     let errorMessage = 'Registration failed. Please try again.';
-    
+
     // PostgreSQL error codes
     if (error.code === '23505') {
       errorMessage = 'Email already registered. Please use a different email or login.';
@@ -324,8 +160,8 @@ const signup = async (req, res) => {
         errorMessage = error.message;
       }
     }
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       success: false,
       error: errorMessage,
       ...(process.env.NODE_ENV === 'development' && { debug: error.message })
@@ -489,7 +325,7 @@ const signin = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         error: errors.array()[0].msg || 'Validation failed'
       });
@@ -504,7 +340,7 @@ const signin = async (req, res) => {
     const result = await query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
     if (result.rows.length === 0) {
       console.log(`  ❌ User not found`);
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
@@ -525,7 +361,7 @@ const signin = async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
       console.log(`  ❌ Invalid password`);
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
@@ -550,7 +386,7 @@ const signin = async (req, res) => {
     });
   } catch (error) {
     console.error('\n❌ Signin error:', error.message);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Login failed. Please try again.'
     });
@@ -569,7 +405,7 @@ const getMe = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
         error: 'User not found'
       });
@@ -588,7 +424,7 @@ const getMe = async (req, res) => {
     });
   } catch (error) {
     console.error('Get current user error:', error.message);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Failed to get user information'
     });
@@ -617,7 +453,7 @@ const forgotPassword = async (req, res) => {
     if (result.rows.length === 0) {
       // Don't reveal if email exists for security
       console.log(`  ℹ️  Email not found or not verified`);
-      return res.json({ 
+      return res.json({
         success: true,
         message: 'If this email is registered, a reset code has been sent'
       });
@@ -626,7 +462,7 @@ const forgotPassword = async (req, res) => {
     // Generate OTP
     const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-    
+
     console.log(`  🔐 Generated OTP: ${otpCode}`);
 
     // Store OTP
@@ -640,7 +476,7 @@ const forgotPassword = async (req, res) => {
       await sendOTPEmail(normalizedEmail, otpCode, 'forgot-password');
       console.log(`✅ Password reset code sent\n`);
 
-      return res.json({ 
+      return res.json({
         success: true,
         emailSent: true,
         message: 'Password reset code sent to your email'
@@ -650,7 +486,7 @@ const forgotPassword = async (req, res) => {
       console.error(`\n❌ Email send failed:`, emailError.message);
       // Return success: false with a user-friendly error so the UI doesn't advance to OTP step
       // This is important - we need to tell the user the email couldn't be sent
-      return res.status(503).json({ 
+      return res.status(503).json({
         success: false,
         emailSent: false,
         error: 'Unable to send email. Please try again later or contact support.',
@@ -659,7 +495,7 @@ const forgotPassword = async (req, res) => {
     }
   } catch (error) {
     console.error('\n❌ Password reset request error:', error.message);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Failed to process password reset request'
     });
@@ -674,7 +510,7 @@ const resetPassword = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         error: errors.array()[0].msg || 'Validation failed'
       });
@@ -702,7 +538,7 @@ const resetPassword = async (req, res) => {
 
     if (result.rows.length === 0) {
       console.log(`  ❌ Invalid or expired OTP`);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         error: 'Invalid or expired reset code'
       });
@@ -723,13 +559,13 @@ const resetPassword = async (req, res) => {
 
     console.log(`  ✅ Password reset successful\n`);
 
-    res.json({ 
+    res.json({
       success: true,
       message: 'Password reset successfully. You can now login with your new password.'
     });
   } catch (error) {
     console.error('\n❌ Password reset error:', error.message);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Failed to reset password'
     });

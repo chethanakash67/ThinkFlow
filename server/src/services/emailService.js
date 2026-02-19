@@ -1,79 +1,107 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT),
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD
-  },
-  debug: true, // Show debug output
-  logger: true // Log information
-});
+// Initialize transporter with standard environment variables
+const createTransporter = () => {
+  // Check for required environment variables
+  const config = {
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  };
 
-// Verify connection on startup
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('❌ SMTP connection failed:', error.message);
-  } else {
-    console.log('✅ SMTP server is ready to send emails');
+  // Log configuration status (without exposing password)
+  console.log('📧 Initializing Email Service:', {
+    host: config.host || 'MISSING',
+    port: config.port,
+    user: config.user || 'MISSING',
+    pass: config.pass ? '******' : 'MISSING'
+  });
+
+  return nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.port === 465, // true for 465, false for other ports
+    auth: {
+      user: config.user,
+      pass: config.pass
+    },
+    // optimize for delivery
+    pool: true, // use pooled connections
+    maxConnections: 5, // max connections
+    maxMessages: 100, // max messages per connection
+    // debug options
+    debug: process.env.NODE_ENV !== 'production',
+    logger: process.env.NODE_ENV !== 'production'
+  });
+};
+
+// Create a singleton instance
+let transporter = null;
+
+const getTransporter = () => {
+  if (!transporter) {
+    transporter = createTransporter();
   }
-});
+  return transporter;
+};
 
 /**
  * Send OTP email
  */
-async function sendOTPEmail(email, otp, fullName) {
-  try {
-    const mailOptions = {
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: 'Your ThinkFlow OTP Code',
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <style>
-            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-            .header { background: #5b5ff5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
-            .otp-box { background: white; border: 2px dashed #5b5ff5; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
-            .otp-code { font-size: 32px; font-weight: bold; color: #5b5ff5; letter-spacing: 8px; }
-            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>Welcome to ThinkFlow</h1>
-            </div>
-            <div class="content">
-              <h2>Hi ${fullName}! 👋</h2>
-              <p>Thank you for registering with ThinkFlow. To complete your registration, please use the OTP code below:</p>
-              
-              <div class="otp-box">
-                <p style="margin: 0; font-size: 14px; color: #666;">Your OTP Code</p>
-                <div class="otp-code">${otp}</div>
-                <p style="margin: 10px 0 0 0; font-size: 12px; color: #999;">Valid for 10 minutes</p>
-              </div>
-              
-              <p><strong>Important:</strong> Do not share this code with anyone.</p>
-              <p>If you didn't request this code, please ignore this email.</p>
-            </div>
-            <div class="footer">
-              <p>&copy; 2026 ThinkFlow. All rights reserved.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-      text: `Hi ${fullName}, Your ThinkFlow OTP code is: ${otp}. Valid for 10 minutes.`
-    };
+async function sendOTPEmail(email, otp, type = 'signup') {
+  const mailTransporter = getTransporter();
 
-    const info = await transporter.sendMail(mailOptions);
+  // Verify connection before sending if not verified yet
+  try {
+    if (!mailTransporter.isIdle() && !mailTransporter.verified) {
+      await mailTransporter.verify();
+      mailTransporter.verified = true;
+      console.log('✅ SMTP connection verified');
+    }
+  } catch (error) {
+    console.error('❌ SMTP Connection Error:', error.message);
+    // Continue anyway to try sending, might work on a fresh connection
+  }
+
+  const subject = type === 'signup'
+    ? 'Verify your ThinkFlow account'
+    : 'Reset your ThinkFlow password';
+
+  const html = type === 'signup'
+    ? `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #4f46e5;">Welcome to ThinkFlow!</h2>
+        <p style="font-size: 16px;">Your verification code is:</p>
+        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h1 style="font-size: 48px; color: #4f46e5; letter-spacing: 10px; margin: 0;">${otp}</h1>
+        </div>
+        <p style="color: #666;">This code will expire in 10 minutes.</p>
+        <p style="color: #999; font-size: 14px;">If you didn't create an account, please ignore this email.</p>
+      </div>
+    `
+    : `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #4f46e5;">Password Reset Request</h2>
+        <p style="font-size: 16px;">Your password reset code is:</p>
+        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h1 style="font-size: 48px; color: #4f46e5; letter-spacing: 10px; margin: 0;">${otp}</h1>
+        </div>
+        <p style="color: #666;">This code will expire in 10 minutes.</p>
+        <p style="color: #999; font-size: 14px;">If you didn't request a password reset, please ignore this email.</p>
+      </div>
+    `;
+
+  const mailOptions = {
+    from: `"${process.env.EMAIL_FROM_NAME || 'ThinkFlow'}" <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
+    to: email,
+    subject: subject,
+    html: html,
+    text: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`
+  };
+
+  try {
+    const info = await mailTransporter.sendMail(mailOptions);
     console.log('✅ OTP email sent:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
@@ -82,4 +110,4 @@ async function sendOTPEmail(email, otp, fullName) {
   }
 }
 
-module.exports = { sendOTPEmail };
+module.exports = { sendOTPEmail, getTransporter };
