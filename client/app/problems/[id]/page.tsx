@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import ProtectedRoute from '@/components/ProtectedRoute'
@@ -16,6 +16,12 @@ interface LogicStep {
   step_number: number
   description: string
   type?: string
+}
+
+interface EditorHint {
+  title: string
+  description: string
+  snippet: string
 }
 
 export default function ProblemDetailPage() {
@@ -38,6 +44,12 @@ export default function ProblemDetailPage() {
   const [loadingSuggestion, setLoadingSuggestion] = useState(false)
   const [editorInstance, setEditorInstance] = useState<any>(null)
   const [syntaxErrors, setSyntaxErrors] = useState<any[]>([])
+  const [showAIHelpPanel, setShowAIHelpPanel] = useState(false)
+  const [aiHelpQuestion, setAiHelpQuestion] = useState('')
+  const [aiHelpResponse, setAiHelpResponse] = useState<any>(null)
+  const [loadingAIHelp, setLoadingAIHelp] = useState(false)
+  const [editorHints, setEditorHints] = useState<EditorHint[]>([])
+  const completionProviderRef = useRef<any>(null)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -105,6 +117,46 @@ export default function ProblemDetailPage() {
     fetchProblem()
   }, [problemId])
 
+  useEffect(() => {
+    const nextHints = buildEditorHints(problem, language)
+    setEditorHints(nextHints)
+  }, [problem, language])
+
+  useEffect(() => {
+    if (!editorInstance) return
+    const monaco = (window as any).monaco
+    if (!monaco) return
+
+    if (completionProviderRef.current) {
+      completionProviderRef.current.dispose()
+      completionProviderRef.current = null
+    }
+
+    const completionItems = buildEditorHints(problem, language).map((hint, index) => ({
+      label: hint.title,
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: hint.snippet,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: hint.description,
+      sortText: `0${index}`
+    }))
+
+    try {
+      completionProviderRef.current = monaco.languages.registerCompletionItemProvider(language, {
+        provideCompletionItems: () => ({ suggestions: completionItems })
+      })
+    } catch (error) {
+      console.warn(`Unable to register completion hints for language: ${language}`, error)
+    }
+
+    return () => {
+      if (completionProviderRef.current) {
+        completionProviderRef.current.dispose()
+        completionProviderRef.current = null
+      }
+    }
+  }, [editorInstance, language, problem])
+
   const getInitialStepsCount = (difficulty: string) => {
     switch (difficulty?.toLowerCase()) {
       case 'easy':
@@ -116,6 +168,69 @@ export default function ProblemDetailPage() {
       default:
         return 4
     }
+  }
+
+  const buildEditorHints = (currentProblem: any, currentLanguage: string): EditorHint[] => {
+    const title = (currentProblem?.title || '').toLowerCase()
+    const functionTemplate =
+      currentLanguage === 'python'
+        ? 'def solve(input_data):\n    # 1) Parse input\n    # 2) Apply algorithm\n    # 3) Return output\n    return None\n'
+        : currentLanguage === 'java'
+          ? 'public class Solution {\n  public static Object solve(Object inputData) {\n    // 1) Parse input\n    // 2) Apply algorithm\n    // 3) Return output\n    return null;\n  }\n}\n'
+          : currentLanguage === 'cpp'
+            ? '#include <bits/stdc++.h>\nusing namespace std;\n\nint solve(vector<int>& nums) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return 0;\n}\n'
+            : currentLanguage === 'c'
+              ? '#include <stdio.h>\n\nint solve(int* nums, int n) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return 0;\n}\n'
+              : 'function solve(inputData) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return null;\n}\n'
+
+    const complexityComment =
+      currentLanguage === 'python'
+        ? '# Time: O(...)\n# Space: O(...)\n'
+        : '// Time: O(...)\n// Space: O(...)\n'
+
+    const commonHints: EditorHint[] = [
+      {
+        title: 'Starter Template',
+        description: `Insert a ${currentLanguage} solve template.`,
+        snippet: functionTemplate
+      },
+      {
+        title: 'Complexity Note',
+        description: 'Add time/space complexity placeholders.',
+        snippet: complexityComment
+      }
+    ]
+
+    if (title.includes('two sum') || title.includes('sum')) {
+      commonHints.push({
+        title: 'Hash Map Pattern',
+        description: 'Use complement lookup to reduce to linear time.',
+        snippet:
+          currentLanguage === 'python'
+            ? 'seen = {}\nfor i, num in enumerate(nums):\n    need = target - num\n    if need in seen:\n        return [seen[need], i]\n    seen[num] = i\n'
+            : 'const seen = new Map();\nfor (let i = 0; i < nums.length; i++) {\n  const need = target - nums[i];\n  if (seen.has(need)) return [seen.get(need), i];\n  seen.set(nums[i], i);\n}\n'
+      })
+    } else if (title.includes('interval')) {
+      commonHints.push({
+        title: 'Sort + Merge Pattern',
+        description: 'Sort by start, then merge overlap windows.',
+        snippet:
+          currentLanguage === 'python'
+            ? 'intervals.sort(key=lambda x: x[0])\nmerged = []\nfor start, end in intervals:\n    if not merged or start > merged[-1][1]:\n        merged.append([start, end])\n    else:\n        merged[-1][1] = max(merged[-1][1], end)\n'
+            : 'intervals.sort((a, b) => a[0] - b[0]);\nconst merged = [];\nfor (const [start, end] of intervals) {\n  if (!merged.length || start > merged[merged.length - 1][1]) {\n    merged.push([start, end]);\n  } else {\n    merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], end);\n  }\n}\n'
+      })
+    } else if (title.includes('palindrome')) {
+      commonHints.push({
+        title: 'Two Pointers Pattern',
+        description: 'Scan from both ends, skipping non-alphanumeric chars.',
+        snippet:
+          currentLanguage === 'python'
+            ? 'left, right = 0, len(s) - 1\nwhile left < right:\n    while left < right and not s[left].isalnum():\n        left += 1\n    while left < right and not s[right].isalnum():\n        right -= 1\n    if s[left].lower() != s[right].lower():\n        return False\n    left += 1\n    right -= 1\nreturn True\n'
+            : 'let left = 0;\nlet right = s.length - 1;\nwhile (left < right) {\n  while (left < right && !/[a-z0-9]/i.test(s[left])) left++;\n  while (left < right && !/[a-z0-9]/i.test(s[right])) right--;\n  if (s[left].toLowerCase() !== s[right].toLowerCase()) return false;\n  left++;\n  right--;\n}\nreturn true;\n'
+      })
+    }
+
+    return commonHints
   }
 
   const addLogicStep = () => {
@@ -267,6 +382,49 @@ export default function ProblemDetailPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const insertHintSnippet = (snippet: string) => {
+    if (!snippet) return
+    if (!editorInstance) {
+      setCode((prev) => `${prev}${prev ? '\n' : ''}${snippet}`)
+      return
+    }
+
+    const selection = editorInstance.getSelection()
+    editorInstance.executeEdits('insert-hint-snippet', [
+      {
+        range: selection,
+        text: snippet,
+        forceMoveMarkers: true
+      }
+    ])
+    editorInstance.focus()
+    setCode(editorInstance.getValue())
+  }
+
+  const handleAskAIHelp = async () => {
+    setLoadingAIHelp(true)
+    setAiHelpResponse(null)
+    try {
+      const response = await api.post(`/problems/${problemId}/ai-help`, {
+        question: aiHelpQuestion.trim() || 'Review my current code and suggest next steps',
+        code,
+        language,
+        logicSteps: logicSteps.map(({ step_number, ...rest }) => rest)
+      })
+      setAiHelpResponse(response.data.help)
+    } catch (error: any) {
+      console.error('Failed to get AI help:', error)
+      setAiHelpResponse({
+        answer: error.response?.data?.error || 'Unable to fetch AI help right now.',
+        hints: [],
+        nextSteps: [],
+        warnings: []
+      })
+    } finally {
+      setLoadingAIHelp(false)
     }
   }
 
@@ -585,23 +743,101 @@ export default function ProblemDetailPage() {
               <div className="code-editor-container">
                 <div className="code-editor-header">
                   <span className="code-editor-title">Code Editor</span>
-                  <select 
-                    value={language} 
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="language-selector"
-                  >
-                    <option value="javascript">JavaScript</option>
-                    <option value="python">Python</option>
-                    <option value="cpp">C++</option>
-                    <option value="java">Java</option>
-                    <option value="c">C</option>
-                  </select>
-                  {syntaxErrors.length > 0 && (
-                    <span className="code-editor-error-badge">
-                      <FaExclamationTriangle /> {syntaxErrors.length} error{syntaxErrors.length > 1 ? 's' : ''}
-                    </span>
-                  )}
+                  <div className="code-editor-controls">
+                    <button
+                      onClick={() => setShowAIHelpPanel((prev) => !prev)}
+                      className="code-ai-help-btn"
+                    >
+                      <FaRobot /> {showAIHelpPanel ? 'Hide AI Help' : 'AI Help'}
+                    </button>
+                    <select 
+                      value={language} 
+                      onChange={(e) => setLanguage(e.target.value)}
+                      className="language-selector"
+                    >
+                      <option value="javascript">JavaScript</option>
+                      <option value="python">Python</option>
+                      <option value="cpp">C++</option>
+                      <option value="java">Java</option>
+                      <option value="c">C</option>
+                    </select>
+                    {syntaxErrors.length > 0 && (
+                      <span className="code-editor-error-badge">
+                        <FaExclamationTriangle /> {syntaxErrors.length} error{syntaxErrors.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <div className="code-hints-panel">
+                  <div className="code-hints-title"><FaLightbulb /> Smart Hints</div>
+                  <div className="code-hints-list">
+                    {editorHints.map((hint, index) => (
+                      <div className="code-hint-card" key={`${hint.title}-${index}`}>
+                        <div className="code-hint-copy">
+                          <div className="code-hint-label">{hint.title}</div>
+                          <div className="code-hint-description">{hint.description}</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="code-hint-insert-btn"
+                          onClick={() => insertHintSnippet(hint.snippet)}
+                        >
+                          Insert
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {showAIHelpPanel && (
+                  <div className="ai-help-panel">
+                    <div className="ai-help-title"><FaRobot /> AI Help Assistant</div>
+                    <p className="ai-help-subtitle">
+                      Ask for debugging guidance, optimization ideas, or edge-case checks based on your current code.
+                    </p>
+                    <textarea
+                      className="ai-help-input"
+                      value={aiHelpQuestion}
+                      onChange={(e) => setAiHelpQuestion(e.target.value)}
+                      placeholder="Example: Why does my loop miss edge cases for empty arrays?"
+                    />
+                    <button
+                      className="ai-help-ask-btn"
+                      onClick={handleAskAIHelp}
+                      disabled={loadingAIHelp}
+                    >
+                      <FaRobot /> {loadingAIHelp ? 'Analyzing...' : 'Ask AI Help'}
+                    </button>
+                    {aiHelpResponse && (
+                      <div className="ai-help-response">
+                        <div className="ai-help-answer">{aiHelpResponse.answer}</div>
+                        {Array.isArray(aiHelpResponse.hints) && aiHelpResponse.hints.length > 0 && (
+                          <div className="ai-help-list-block">
+                            <div className="ai-help-list-title">Hints</div>
+                            {aiHelpResponse.hints.map((hint: string, idx: number) => (
+                              <div key={`hint-${idx}`} className="ai-help-item">• {hint}</div>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(aiHelpResponse.nextSteps) && aiHelpResponse.nextSteps.length > 0 && (
+                          <div className="ai-help-list-block">
+                            <div className="ai-help-list-title">Next Steps</div>
+                            {aiHelpResponse.nextSteps.map((step: string, idx: number) => (
+                              <div key={`step-${idx}`} className="ai-help-item">• {step}</div>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(aiHelpResponse.warnings) && aiHelpResponse.warnings.length > 0 && (
+                          <div className="ai-help-list-block">
+                            <div className="ai-help-list-title">Watchouts</div>
+                            {aiHelpResponse.warnings.map((warning: string, idx: number) => (
+                              <div key={`warning-${idx}`} className="ai-help-item warning">• {warning}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <Editor
                   height="500px"
                   language={language}

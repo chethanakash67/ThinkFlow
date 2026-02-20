@@ -1,4 +1,5 @@
 const { query } = require('../src/config/db');
+const { generateAIHelp } = require('../services/aiHelpService');
 
 const getDedupedProblemsQuery = (hasDifficultyFilter) => {
   const whereClause = hasDifficultyFilter ? 'WHERE difficulty = $1' : '';
@@ -60,6 +61,37 @@ const getProblemById = async (req, res) => {
   } catch (error) {
     console.error('Get problem error:', error);
     res.status(500).json({ error: 'Failed to fetch problem' });
+  }
+};
+
+// Get AI help for a specific problem and current editor context
+const getAIHelp = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { question, code, language, logicSteps } = req.body || {};
+
+    const result = await query(
+      'SELECT id, title, description, difficulty, constraints, examples FROM problems WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    const problem = result.rows[0];
+    const help = await generateAIHelp({
+      problem,
+      question: question || '',
+      code: code || '',
+      language: language || 'javascript',
+      logicSteps: Array.isArray(logicSteps) ? logicSteps : []
+    });
+
+    res.json({ help });
+  } catch (error) {
+    console.error('AI help error:', error);
+    res.status(500).json({ error: 'Failed to generate AI help' });
   }
 };
 
@@ -179,6 +211,7 @@ const deleteProblem = async (req, res) => {
 module.exports = {
   getProblems,
   getProblemById,
+  getAIHelp,
   createProblem,
   updateProblem,
   deleteProblem,
