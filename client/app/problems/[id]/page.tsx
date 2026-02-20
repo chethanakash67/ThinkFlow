@@ -49,7 +49,16 @@ export default function ProblemDetailPage() {
   const [aiHelpResponse, setAiHelpResponse] = useState<any>(null)
   const [loadingAIHelp, setLoadingAIHelp] = useState(false)
   const [editorHints, setEditorHints] = useState<EditorHint[]>([])
+  const [logicHistory, setLogicHistory] = useState<any[]>([])
+  const [codeHistory, setCodeHistory] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [customInputText, setCustomInputText] = useState('{\n  "nums": [2, 7, 11, 15],\n  "target": 9\n}')
+  const [customExpectedText, setCustomExpectedText] = useState('[0, 1]')
+  const [customRunResult, setCustomRunResult] = useState<any>(null)
+  const [runningCustomTest, setRunningCustomTest] = useState(false)
+  const [draftSavedAt, setDraftSavedAt] = useState<string>('')
   const completionProviderRef = useRef<any>(null)
+  const draftLoadedRef = useRef(false)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -62,6 +71,11 @@ export default function ProblemDetailPage() {
     }
     loadUser()
   }, [])
+
+  useEffect(() => {
+    draftLoadedRef.current = false
+    setDraftSavedAt('')
+  }, [problemId])
 
   // Clear syntax errors when language changes
   useEffect(() => {
@@ -233,6 +247,83 @@ export default function ProblemDetailPage() {
     return commonHints
   }
 
+  const getDraftStorageKey = () => `thinkflow:draft:problem:${problemId}`
+
+  const parseJsonText = (raw: string) => {
+    try {
+      return { ok: true, value: JSON.parse(raw) }
+    } catch (error: any) {
+      return { ok: false, error: error?.message || 'Invalid JSON' }
+    }
+  }
+
+  const fetchSubmissionHistory = async () => {
+    setLoadingHistory(true)
+    try {
+      const [logicResponse, codeResponse] = await Promise.all([
+        api.get('/submissions/logic', { params: { problemId } }),
+        api.get('/submissions/code', { params: { problemId } })
+      ])
+      setLogicHistory(logicResponse.data.submissions || [])
+      setCodeHistory(codeResponse.data.submissions || [])
+    } catch (error) {
+      console.error('Failed to fetch submission history:', error)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const clearDraft = () => {
+    localStorage.removeItem(getDraftStorageKey())
+    setDraftSavedAt('')
+    alert('Draft cleared for this problem')
+  }
+
+  useEffect(() => {
+    fetchSubmissionHistory()
+  }, [problemId])
+
+  useEffect(() => {
+    if (!problem || draftLoadedRef.current) return
+    const rawDraft = localStorage.getItem(getDraftStorageKey())
+    if (!rawDraft) {
+      draftLoadedRef.current = true
+      return
+    }
+
+    try {
+      const draft = JSON.parse(rawDraft)
+      if (draft.code && typeof draft.code === 'string') {
+        setCode(draft.code)
+      }
+      if (draft.language && typeof draft.language === 'string') {
+        setLanguage(draft.language)
+      }
+      if (Array.isArray(draft.logicSteps) && draft.logicSteps.length > 0) {
+        setLogicSteps(draft.logicSteps)
+      }
+      if (draft.updatedAt) {
+        setDraftSavedAt(new Date(draft.updatedAt).toLocaleString())
+      }
+    } catch (error) {
+      console.error('Failed to restore draft:', error)
+    } finally {
+      draftLoadedRef.current = true
+    }
+  }, [problem, problemId])
+
+  useEffect(() => {
+    if (!draftLoadedRef.current || !problem) return
+    const payload = {
+      code,
+      language,
+      logicSteps,
+      updatedAt: new Date().toISOString()
+    }
+    localStorage.setItem(getDraftStorageKey(), JSON.stringify(payload))
+    setDraftSavedAt(new Date(payload.updatedAt).toLocaleString())
+  }, [code, language, logicSteps, problem, problemId])
+
   const addLogicStep = () => {
     setLogicSteps([
       ...logicSteps,
@@ -267,6 +358,7 @@ export default function ProblemDetailPage() {
       })
       setSubmission(response.data.submission)
       setExecutionSteps(response.data.executionSteps || [])
+      fetchSubmissionHistory()
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to submit logic')
     } finally {
@@ -344,6 +436,7 @@ export default function ProblemDetailPage() {
       console.log('Submission response:', response.data)
       
       setCodeSubmission(response.data.submission)
+      fetchSubmissionHistory()
       
       // Show success/failure message
       if (response.data.submission.status === 'correct') {
@@ -382,6 +475,48 @@ export default function ProblemDetailPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleRunCustomTest = async () => {
+    if (!code.trim()) {
+      alert('Please write code before running custom tests')
+      return
+    }
+
+    const parsedInput = parseJsonText(customInputText)
+    if (!parsedInput.ok) {
+      alert(`Custom input JSON error: ${parsedInput.error}`)
+      return
+    }
+
+    const parsedExpected = parseJsonText(customExpectedText)
+    if (!parsedExpected.ok) {
+      alert(`Expected output JSON error: ${parsedExpected.error}`)
+      return
+    }
+
+    setRunningCustomTest(true)
+    setCustomRunResult(null)
+    try {
+      const response = await api.post('/submissions/code/custom-test', {
+        problemId,
+        code,
+        language,
+        customInput: parsedInput.value,
+        expectedOutput: parsedExpected.value
+      })
+      setCustomRunResult(response.data.result)
+    } catch (error: any) {
+      setCustomRunResult({
+        passed: false,
+        error: error.response?.data?.error || 'Failed to run custom test',
+        expectedOutput: parsedExpected.value,
+        actualOutput: null,
+        input: parsedInput.value
+      })
+    } finally {
+      setRunningCustomTest(false)
     }
   }
 
@@ -642,6 +777,14 @@ export default function ProblemDetailPage() {
             <div className="solution-header">
               <h2 className="solution-title">Solution Logic</h2>
               <p className="solution-subtitle">Break down your solution into structured steps. Be specific about what each step does.</p>
+              <div className="draft-status-row">
+                <span className="draft-status-text">
+                  Draft autosave: {draftSavedAt ? `saved at ${draftSavedAt}` : 'waiting for your first edit'}
+                </span>
+                <button type="button" onClick={clearDraft} className="draft-clear-btn">
+                  Clear Draft
+                </button>
+              </div>
               <button 
                 onClick={getAISuggestion} 
                 disabled={loadingSuggestion}
@@ -838,6 +981,53 @@ export default function ProblemDetailPage() {
                     )}
                   </div>
                 )}
+                <div className="custom-test-panel">
+                  <h4 className="custom-test-title">Custom Test Runner</h4>
+                  <p className="custom-test-subtitle">
+                    Validate your code on your own input/output before submitting official test cases.
+                  </p>
+                  <div className="custom-test-grid">
+                    <div className="custom-test-col">
+                      <label className="custom-test-label">Input (JSON)</label>
+                      <textarea
+                        className="custom-test-textarea"
+                        value={customInputText}
+                        onChange={(e) => setCustomInputText(e.target.value)}
+                      />
+                    </div>
+                    <div className="custom-test-col">
+                      <label className="custom-test-label">Expected Output (JSON)</label>
+                      <textarea
+                        className="custom-test-textarea"
+                        value={customExpectedText}
+                        onChange={(e) => setCustomExpectedText(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunCustomTest}
+                    disabled={runningCustomTest}
+                    className="custom-test-run-btn"
+                  >
+                    {runningCustomTest ? 'Running Custom Test...' : 'Run Custom Test'}
+                  </button>
+                  {customRunResult && (
+                    <div className={`custom-test-result ${customRunResult.passed ? 'passed' : 'failed'}`}>
+                      <div className="custom-test-result-title">
+                        {customRunResult.passed ? 'Custom test passed' : 'Custom test failed'}
+                      </div>
+                      {customRunResult.error ? (
+                        <div className="custom-test-result-line">Error: {customRunResult.error}</div>
+                      ) : (
+                        <>
+                          <div className="custom-test-result-line">Expected: {JSON.stringify(customRunResult.expectedOutput)}</div>
+                          <div className="custom-test-result-line">Actual: {JSON.stringify(customRunResult.actualOutput)}</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <Editor
                   height="500px"
                   language={language}
@@ -1076,6 +1266,50 @@ export default function ProblemDetailPage() {
                 ))}
               </div>
             )}
+
+            <div className="history-section">
+              <h3 className="problem-section-title">Submission History</h3>
+              {loadingHistory ? (
+                <p className="history-loading">Loading history...</p>
+              ) : (
+                <>
+                  <div className="history-block">
+                    <h4 className="history-block-title">Logic Attempts</h4>
+                    {logicHistory.length === 0 ? (
+                      <p className="history-empty">No logic submissions yet.</p>
+                    ) : (
+                      <div className="history-list">
+                        {logicHistory.slice(0, 10).map((entry) => (
+                          <div className="history-item" key={`logic-${entry.id}`}>
+                            <span>v{entry.version}</span>
+                            <span className={`history-status ${entry.status}`}>{entry.status}</span>
+                            <span>{entry.score}/100</span>
+                            <span>{new Date(entry.created_at).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="history-block">
+                    <h4 className="history-block-title">Code Attempts</h4>
+                    {codeHistory.length === 0 ? (
+                      <p className="history-empty">No code submissions yet.</p>
+                    ) : (
+                      <div className="history-list">
+                        {codeHistory.slice(0, 10).map((entry) => (
+                          <div className="history-item" key={`code-${entry.id}`}>
+                            <span>{entry.language}</span>
+                            <span className={`history-status ${entry.status}`}>{entry.status}</span>
+                            <span>{entry.passedCount}/{entry.totalCount}</span>
+                            <span>{new Date(entry.created_at).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

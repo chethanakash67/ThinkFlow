@@ -10,6 +10,8 @@ router.post('/logic', submissionController.submitLogic);
 router.get('/logic', submissionController.getSubmissions);
 router.get('/logic/:submissionId/steps', submissionController.getExecutionSteps);
 router.post('/code', submissionController.submitCode);
+router.post('/code/custom-test', submissionController.runCustomCodeTest);
+router.get('/code', submissionController.getCodeSubmissions);
 router.get('/dashboard', submissionController.getDashboardStats);
 
 module.exports = router;

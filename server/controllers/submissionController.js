@@ -1,5 +1,6 @@
 const { query } = require('../src/config/db');
 const { evaluateLogic, generateExecutionSteps } = require('../services/logicEvaluationService');
+const { executeCode } = require('../services/codeExecutionService');
 
 // Submit logic for evaluation
 const submitLogic = async (req, res) => {
@@ -180,7 +181,6 @@ const submitCode = async (req, res) => {
     }));
 
     // Execute code against test cases
-    const { executeCode } = require('../services/codeExecutionService');
     console.log(`Executing ${selectedLanguage} code for problem ${problemId} with ${testCases.length} test cases`);
     
     const executionResult = await executeCode(code, testCases, selectedLanguage);
@@ -246,6 +246,105 @@ const submitCode = async (req, res) => {
   }
 };
 
+// Run code on a custom single test case without saving as a submission
+const runCustomCodeTest = async (req, res) => {
+  try {
+    const { problemId, code, language, customInput, expectedOutput } = req.body;
+
+    if (!problemId || !code) {
+      return res.status(400).json({ error: 'Problem ID and code are required' });
+    }
+
+    if (customInput === undefined || expectedOutput === undefined) {
+      return res.status(400).json({ error: 'Custom input and expected output are required' });
+    }
+
+    const supportedLanguages = ['javascript', 'python', 'cpp', 'java', 'c'];
+    const selectedLanguage = (language || 'javascript').toLowerCase();
+
+    if (!supportedLanguages.includes(selectedLanguage)) {
+      return res.status(400).json({
+        error: `Unsupported language: ${language}. Supported languages: ${supportedLanguages.join(', ')}`
+      });
+    }
+
+    const problemResult = await query('SELECT id FROM problems WHERE id = $1', [problemId]);
+    if (problemResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    const customTestCase = [{ input: customInput, output: expectedOutput }];
+    const executionResult = await executeCode(code, customTestCase, selectedLanguage);
+
+    if (executionResult.status === 'error') {
+      return res.status(400).json({
+        error: executionResult.error || 'Execution error',
+        details: executionResult.errorDetails,
+        result: executionResult.results?.[0] || null
+      });
+    }
+
+    return res.json({
+      result: executionResult.results[0],
+      status: executionResult.results[0]?.passed ? 'passed' : 'failed'
+    });
+  } catch (error) {
+    console.error('Run custom code test error:', error);
+    res.status(500).json({ error: 'Failed to run custom test case' });
+  }
+};
+
+// Get user code submissions, optionally filtered by problem
+const getCodeSubmissions = async (req, res) => {
+  try {
+    const { problemId } = req.query;
+    const userId = req.user.id;
+
+    let result;
+    if (problemId) {
+      result = await query(
+        `SELECT id, problem_id, language, status, execution_time, test_results, created_at
+         FROM code_submissions
+         WHERE user_id = $1 AND problem_id = $2
+         ORDER BY created_at DESC`,
+        [userId, problemId]
+      );
+    } else {
+      result = await query(
+        `SELECT id, problem_id, language, status, execution_time, test_results, created_at
+         FROM code_submissions
+         WHERE user_id = $1
+         ORDER BY created_at DESC`,
+        [userId]
+      );
+    }
+
+    const submissions = result.rows.map((submission) => {
+      const results = Array.isArray(submission.test_results) ? submission.test_results : [];
+      const passedCount = results.filter((test) => test.passed).length;
+      const totalCount = results.length;
+      const score = totalCount > 0 ? Math.round((passedCount / totalCount) * 100) : 0;
+
+      return {
+        id: submission.id,
+        problem_id: submission.problem_id,
+        language: submission.language,
+        status: submission.status,
+        execution_time: submission.execution_time,
+        created_at: submission.created_at,
+        passedCount,
+        totalCount,
+        score
+      };
+    });
+
+    res.json({ submissions });
+  } catch (error) {
+    console.error('Get code submissions error:', error);
+    res.status(500).json({ error: 'Failed to fetch code submissions' });
+  }
+};
+
 // Get user dashboard stats
 const getDashboardStats = async (req, res) => {
   try {
@@ -290,5 +389,7 @@ module.exports = {
   getSubmissions,
   getExecutionSteps,
   submitCode,
+  runCustomCodeTest,
+  getCodeSubmissions,
   getDashboardStats,
 };
