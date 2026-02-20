@@ -1,5 +1,21 @@
 const { query } = require('../src/config/db');
 
+const getDedupedProblemsQuery = (hasDifficultyFilter) => {
+  const whereClause = hasDifficultyFilter ? 'WHERE difficulty = $1' : '';
+
+  return `
+    SELECT id, title, description, difficulty, constraints, examples, created_at
+    FROM (
+      SELECT DISTINCT ON (LOWER(BTRIM(title)))
+        id, title, description, difficulty, constraints, examples, created_at
+      FROM problems
+      ${whereClause}
+      ORDER BY LOWER(BTRIM(title)), created_at DESC, id DESC
+    ) deduped_problems
+    ORDER BY created_at DESC, id DESC
+  `;
+};
+
 // Get all problems with optional difficulty filter
 const getProblems = async (req, res) => {
   try {
@@ -8,13 +24,13 @@ const getProblems = async (req, res) => {
 
     if (difficulty && ['easy', 'medium', 'hard'].includes(difficulty)) {
       const result = await query(
-        'SELECT id, title, description, difficulty, constraints, examples, created_at FROM problems WHERE difficulty = $1 ORDER BY created_at DESC',
+        getDedupedProblemsQuery(true),
         [difficulty]
       );
       problems = result.rows;
     } else {
       const result = await query(
-        'SELECT id, title, description, difficulty, constraints, examples, created_at FROM problems ORDER BY created_at DESC'
+        getDedupedProblemsQuery(false)
       );
       problems = result.rows;
     }
@@ -69,6 +85,9 @@ const createProblem = async (req, res) => {
 
     res.status(201).json({ problem: result.rows[0] });
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'A problem with this title already exists' });
+    }
     console.error('Create problem error:', error);
     res.status(500).json({ error: 'Failed to create problem' });
   }

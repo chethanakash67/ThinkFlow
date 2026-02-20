@@ -700,6 +700,42 @@ const runMigrations = async () => {
       console.error(`  ❌ ${migration.name}: ${error.message}`);
     }
   }
+
+  // Keep only the newest row for each normalized problem title
+  try {
+    const dedupeResult = await dbPool.query(`
+      WITH ranked_problems AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY LOWER(BTRIM(title))
+            ORDER BY created_at DESC, id DESC
+          ) AS row_num
+        FROM problems
+      )
+      DELETE FROM problems p
+      USING ranked_problems rp
+      WHERE p.id = rp.id AND rp.row_num > 1
+      RETURNING p.id
+    `);
+    if (dedupeResult.rowCount > 0) {
+      console.log(`  ✅ Removed ${dedupeResult.rowCount} duplicate problem rows`);
+    } else {
+      console.log('  ⊙ Problem deduplication (no duplicates found)');
+    }
+  } catch (error) {
+    console.error(`  ❌ Problem deduplication: ${error.message}`);
+  }
+
+  // Prevent future duplicates regardless of title casing/whitespace
+  try {
+    await dbPool.query(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_title_unique_normalized ON problems (LOWER(BTRIM(title)))'
+    );
+    console.log('  ✅ Unique problem-title index ensured');
+  } catch (error) {
+    console.error(`  ❌ Unique problem-title index: ${error.message}`);
+  }
   
   console.log('✅ Migrations complete\n');
 };
