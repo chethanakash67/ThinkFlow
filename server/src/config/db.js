@@ -479,105 +479,479 @@ const seedProblems = async (dbPool) => {
       title: 'Two Sum',
       description: 'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.',
       difficulty: 'easy',
-      test_cases: JSON.stringify([
-        {"input": {"nums": [2,7,11,15], "target": 9}},
-        {"input": {"nums": [3,2,4], "target": 6}},
-        {"input": {"nums": [3,3], "target": 6}}
-      ]),
-      expected_outputs: JSON.stringify([
-        {"output": [0,1]},
-        {"output": [1,2]},
-        {"output": [0,1]}
-      ]),
-      constraints: '2 <= nums.length <= 104',
-      examples: JSON.stringify([
-        {"input": {"nums": [2,7,11,15], "target": 9}, "output": [0,1], "explanation": "Because nums[0] + nums[1] == 9, we return [0, 1]."}
-      ])
+      test_cases: [{ input: { nums: [2, 7, 11, 15], target: 9 } }],
+      expected_outputs: [{ output: [0, 1] }],
+      constraints: '2 <= nums.length <= 10^4',
+      examples: [{ input: { nums: [2, 7, 11, 15], target: 9 }, output: [0, 1], explanation: 'nums[0] + nums[1] = 9.' }]
     },
     {
       title: 'Reverse String',
-      description: 'Write a function that reverses a string. The input string is given as an array of characters s.',
+      description: 'Write a function that reverses a string represented as an array of characters in-place.',
       difficulty: 'easy',
-      test_cases: JSON.stringify([
-        {"input": {"s": ["h","e","l","l","o"]}},
-        {"input": {"s": ["H","a","n","n","a","h"]}}
-      ]),
-      expected_outputs: JSON.stringify([
-        {"output": ["o","l","l","e","h"]},
-        {"output": ["h","a","n","n","a","H"]}
-      ]),
-      constraints: '1 <= s.length <= 105',
-      examples: JSON.stringify([
-        {"input": {"s": ["h","e","l","l","o"]}, "output": ["o","l","l","e","h"], "explanation": "Reverse the characters in the array."}
-      ])
+      test_cases: [{ input: { s: ['h', 'e', 'l', 'l', 'o'] } }],
+      expected_outputs: [{ output: ['o', 'l', 'l', 'e', 'h'] }],
+      constraints: '1 <= s.length <= 10^5',
+      examples: [{ input: { s: ['h', 'e', 'l', 'l', 'o'] }, output: ['o', 'l', 'l', 'e', 'h'], explanation: 'Swap mirrored pairs.' }]
     },
     {
       title: 'Valid Palindrome',
-      description: 'A phrase is a palindrome if it reads the same forward and backward. Given a string s, return true if it is a palindrome.',
+      description: 'Given a string s, return true if it is a palindrome after converting to lowercase and removing non-alphanumeric characters.',
       difficulty: 'easy',
-      test_cases: JSON.stringify([
-        {"input": {"s": "A man, a plan, a canal: Panama"}},
-        {"input": {"s": "race a car"}}
-      ]),
-      expected_outputs: JSON.stringify([
-        {"output": true},
-        {"output": false}
-      ]),
-      constraints: '1 <= s.length <= 2 * 105',
-      examples: JSON.stringify([
-        {"input": {"s": "A man, a plan, a canal: Panama"}, "output": true, "explanation": "amanaplanacanalpanama is a palindrome."}
-      ])
+      test_cases: [{ input: { s: 'A man, a plan, a canal: Panama' } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= s.length <= 2 * 10^5',
+      examples: [{ input: { s: 'A man, a plan, a canal: Panama' }, output: true, explanation: 'Filtered string reads the same in both directions.' }]
     },
     {
       title: 'Maximum Subarray',
-      description: 'Given an integer array nums, find the subarray with the largest sum, and return its sum.',
+      description: 'Given an integer array nums, find the contiguous subarray with the largest sum and return its sum.',
       difficulty: 'medium',
-      test_cases: JSON.stringify([
-        {"input": {"nums": [-2,1,-3,4,-1,2,1,-5,4]}},
-        {"input": {"nums": [1]}},
-        {"input": {"nums": [5,4,-1,7,8]}}
-      ]),
-      expected_outputs: JSON.stringify([
-        {"output": 6},
-        {"output": 1},
-        {"output": 23}
-      ]),
-      constraints: '1 <= nums.length <= 105',
-      examples: JSON.stringify([
-        {"input": {"nums": [-2,1,-3,4,-1,2,1,-5,4]}, "output": 6, "explanation": "The subarray [4,-1,2,1] has the largest sum 6."}
-      ])
+      test_cases: [{ input: { nums: [-2, 1, -3, 4, -1, 2, 1, -5, 4] } }],
+      expected_outputs: [{ output: 6 }],
+      constraints: '1 <= nums.length <= 10^5',
+      examples: [{ input: { nums: [-2, 1, -3, 4, -1, 2, 1, -5, 4] }, output: 6, explanation: 'Best subarray is [4, -1, 2, 1].' }]
     },
     {
       title: 'Merge Intervals',
       description: 'Given an array of intervals, merge all overlapping intervals.',
       difficulty: 'medium',
-      test_cases: JSON.stringify([
-        {"input": {"intervals": [[1,3],[2,6],[8,10],[15,18]]}},
-        {"input": {"intervals": [[1,4],[4,5]]}}
-      ]),
-      expected_outputs: JSON.stringify([
-        {"output": [[1,6],[8,10],[15,18]]},
-        {"output": [[1,5]]}
-      ]),
-      constraints: '1 <= intervals.length <= 104',
-      examples: JSON.stringify([
-        {"input": {"intervals": [[1,3],[2,6],[8,10],[15,18]]}, "output": [[1,6],[8,10],[15,18]], "explanation": "Intervals [1,3] and [2,6] overlap, merge them into [1,6]."}
-      ])
+      test_cases: [{ input: { intervals: [[1, 3], [2, 6], [8, 10], [15, 18]] } }],
+      expected_outputs: [{ output: [[1, 6], [8, 10], [15, 18]] }],
+      constraints: '1 <= intervals.length <= 10^4',
+      examples: [{ input: { intervals: [[1, 3], [2, 6], [8, 10], [15, 18]] }, output: [[1, 6], [8, 10], [15, 18]], explanation: 'Intervals [1,3] and [2,6] overlap.' }]
+    },
+    {
+      title: 'Contains Duplicate',
+      description: 'Given an integer array nums, return true if any value appears at least twice.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums: [1, 2, 3, 1] } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= nums.length <= 10^5',
+      examples: [{ input: { nums: [1, 2, 3, 1] }, output: true, explanation: 'Value 1 appears twice.' }]
+    },
+    {
+      title: 'Best Time to Buy and Sell Stock',
+      description: 'Given prices where prices[i] is the stock price on day i, return the maximum profit from one transaction.',
+      difficulty: 'easy',
+      test_cases: [{ input: { prices: [7, 1, 5, 3, 6, 4] } }],
+      expected_outputs: [{ output: 5 }],
+      constraints: '1 <= prices.length <= 10^5',
+      examples: [{ input: { prices: [7, 1, 5, 3, 6, 4] }, output: 5, explanation: 'Buy at 1 and sell at 6.' }]
+    },
+    {
+      title: 'Valid Anagram',
+      description: 'Given two strings s and t, return true if t is an anagram of s.',
+      difficulty: 'easy',
+      test_cases: [{ input: { s: 'anagram', t: 'nagaram' } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= s.length, t.length <= 5 * 10^4',
+      examples: [{ input: { s: 'anagram', t: 'nagaram' }, output: true, explanation: 'Both strings have identical character counts.' }]
+    },
+    {
+      title: 'Binary Search',
+      description: 'Given a sorted array and target, return target index if found, otherwise -1.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums: [-1, 0, 3, 5, 9, 12], target: 9 } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: 'n is in [1, 10^4]',
+      examples: [{ input: { nums: [-1, 0, 3, 5, 9, 12], target: 9 }, output: 4, explanation: '9 exists at index 4.' }]
+    },
+    {
+      title: 'Climbing Stairs',
+      description: 'You can climb 1 or 2 steps. Return how many distinct ways to reach the top of n stairs.',
+      difficulty: 'easy',
+      test_cases: [{ input: { n: 5 } }],
+      expected_outputs: [{ output: 8 }],
+      constraints: '1 <= n <= 45',
+      examples: [{ input: { n: 5 }, output: 8, explanation: 'Fibonacci progression.' }]
+    },
+    {
+      title: 'Missing Number',
+      description: 'Given nums containing n distinct numbers in [0, n], return the missing number.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums: [3, 0, 1] } }],
+      expected_outputs: [{ output: 2 }],
+      constraints: '1 <= nums.length <= 10^4',
+      examples: [{ input: { nums: [3, 0, 1] }, output: 2, explanation: '2 is missing from [0, 3].' }]
+    },
+    {
+      title: 'Single Number',
+      description: 'Every element appears twice except one. Return that single one.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums: [4, 1, 2, 1, 2] } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: '1 <= nums.length <= 3 * 10^4',
+      examples: [{ input: { nums: [4, 1, 2, 1, 2] }, output: 4, explanation: 'XOR cancels duplicate pairs.' }]
+    },
+    {
+      title: 'Move Zeroes',
+      description: 'Move all 0s to the end while maintaining the relative order of non-zero elements.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums: [0, 1, 0, 3, 12] } }],
+      expected_outputs: [{ output: [1, 3, 12, 0, 0] }],
+      constraints: '1 <= nums.length <= 10^4',
+      examples: [{ input: { nums: [0, 1, 0, 3, 12] }, output: [1, 3, 12, 0, 0], explanation: 'Shift non-zero values left.' }]
+    },
+    {
+      title: "Pascal's Triangle",
+      description: 'Given an integer numRows, return the first numRows of Pascal\'s triangle.',
+      difficulty: 'easy',
+      test_cases: [{ input: { numRows: 5 } }],
+      expected_outputs: [{ output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]] }],
+      constraints: '1 <= numRows <= 30',
+      examples: [{ input: { numRows: 5 }, output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]], explanation: 'Each internal value is sum of two above.' }]
+    },
+    {
+      title: 'Intersection of Two Arrays II',
+      description: 'Return an array of common elements between two arrays, including multiplicities.',
+      difficulty: 'easy',
+      test_cases: [{ input: { nums1: [1, 2, 2, 1], nums2: [2, 2] } }],
+      expected_outputs: [{ output: [2, 2] }],
+      constraints: '1 <= nums1.length, nums2.length <= 1000',
+      examples: [{ input: { nums1: [1, 2, 2, 1], nums2: [2, 2] }, output: [2, 2], explanation: '2 appears twice in both arrays.' }]
+    },
+    {
+      title: 'Product of Array Except Self',
+      description: 'Return an array answer where answer[i] equals product of all elements except nums[i].',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [1, 2, 3, 4] } }],
+      expected_outputs: [{ output: [24, 12, 8, 6] }],
+      constraints: '2 <= nums.length <= 10^5',
+      examples: [{ input: { nums: [1, 2, 3, 4] }, output: [24, 12, 8, 6], explanation: 'Use prefix and suffix products.' }]
+    },
+    {
+      title: 'Top K Frequent Elements',
+      description: 'Return the k most frequent elements in the array.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [1, 1, 1, 2, 2, 3], k: 2 } }],
+      expected_outputs: [{ output: [1, 2] }],
+      constraints: '1 <= nums.length <= 10^5',
+      examples: [{ input: { nums: [1, 1, 1, 2, 2, 3], k: 2 }, output: [1, 2], explanation: '1 and 2 have highest frequencies.' }]
+    },
+    {
+      title: 'Group Anagrams',
+      description: 'Group strings that are anagrams of each other.',
+      difficulty: 'medium',
+      test_cases: [{ input: { strs: ['eat', 'tea', 'tan', 'ate', 'nat', 'bat'] } }],
+      expected_outputs: [{ output: [['eat', 'tea', 'ate'], ['tan', 'nat'], ['bat']] }],
+      constraints: '1 <= strs.length <= 10^4',
+      examples: [{ input: { strs: ['eat', 'tea', 'tan', 'ate', 'nat', 'bat'] }, output: [['eat', 'tea', 'ate'], ['tan', 'nat'], ['bat']], explanation: 'Sort chars to build grouping key.' }]
+    },
+    {
+      title: 'Longest Consecutive Sequence',
+      description: 'Return the length of the longest consecutive elements sequence.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [100, 4, 200, 1, 3, 2] } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: '0 <= nums.length <= 10^5',
+      examples: [{ input: { nums: [100, 4, 200, 1, 3, 2] }, output: 4, explanation: 'Sequence is [1,2,3,4].' }]
+    },
+    {
+      title: '3Sum',
+      description: 'Return all unique triplets [a,b,c] such that a + b + c = 0.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [-1, 0, 1, 2, -1, -4] } }],
+      expected_outputs: [{ output: [[-1, -1, 2], [-1, 0, 1]] }],
+      constraints: '3 <= nums.length <= 3000',
+      examples: [{ input: { nums: [-1, 0, 1, 2, -1, -4] }, output: [[-1, -1, 2], [-1, 0, 1]], explanation: 'Use sorting plus two pointers.' }]
+    },
+    {
+      title: 'Container With Most Water',
+      description: 'Given heights, find two lines that together with x-axis form a container holding max water.',
+      difficulty: 'medium',
+      test_cases: [{ input: { height: [1, 8, 6, 2, 5, 4, 8, 3, 7] } }],
+      expected_outputs: [{ output: 49 }],
+      constraints: '2 <= height.length <= 10^5',
+      examples: [{ input: { height: [1, 8, 6, 2, 5, 4, 8, 3, 7] }, output: 49, explanation: 'Best pair is height 8 and 7 with width 7.' }]
+    },
+    {
+      title: 'Search in Rotated Sorted Array',
+      description: 'Given a rotated sorted array and target, return index if found, else -1.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [4, 5, 6, 7, 0, 1, 2], target: 0 } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: '1 <= nums.length <= 5000',
+      examples: [{ input: { nums: [4, 5, 6, 7, 0, 1, 2], target: 0 }, output: 4, explanation: 'Binary search on sorted half each step.' }]
+    },
+    {
+      title: 'Find Minimum in Rotated Sorted Array',
+      description: 'Find the minimum element in a rotated sorted array with unique elements.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [3, 4, 5, 1, 2] } }],
+      expected_outputs: [{ output: 1 }],
+      constraints: '1 <= nums.length <= 5000',
+      examples: [{ input: { nums: [3, 4, 5, 1, 2] }, output: 1, explanation: 'Pivot point gives minimum.' }]
+    },
+    {
+      title: 'Kth Largest Element in an Array',
+      description: 'Find the kth largest element in an unsorted array.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [3, 2, 1, 5, 6, 4], k: 2 } }],
+      expected_outputs: [{ output: 5 }],
+      constraints: '1 <= k <= nums.length <= 10^5',
+      examples: [{ input: { nums: [3, 2, 1, 5, 6, 4], k: 2 }, output: 5, explanation: 'Second largest is 5.' }]
+    },
+    {
+      title: 'Longest Substring Without Repeating Characters',
+      description: 'Return the length of the longest substring without repeating characters.',
+      difficulty: 'medium',
+      test_cases: [{ input: { s: 'abcabcbb' } }],
+      expected_outputs: [{ output: 3 }],
+      constraints: '0 <= s.length <= 5 * 10^4',
+      examples: [{ input: { s: 'abcabcbb' }, output: 3, explanation: 'Longest unique substring is "abc".' }]
+    },
+    {
+      title: 'Longest Palindromic Substring',
+      description: 'Given a string s, return the longest palindromic substring.',
+      difficulty: 'medium',
+      test_cases: [{ input: { s: 'babad' } }],
+      expected_outputs: [{ output: 'bab' }],
+      constraints: '1 <= s.length <= 1000',
+      examples: [{ input: { s: 'babad' }, output: 'bab', explanation: '"aba" is also valid.' }]
+    },
+    {
+      title: 'Letter Combinations of a Phone Number',
+      description: 'Given digits 2-9, return all possible letter combinations.',
+      difficulty: 'medium',
+      test_cases: [{ input: { digits: '23' } }],
+      expected_outputs: [{ output: ['ad', 'ae', 'af', 'bd', 'be', 'bf', 'cd', 'ce', 'cf'] }],
+      constraints: '0 <= digits.length <= 4',
+      examples: [{ input: { digits: '23' }, output: ['ad', 'ae', 'af', 'bd', 'be', 'bf', 'cd', 'ce', 'cf'], explanation: 'Use backtracking over digit mappings.' }]
+    },
+    {
+      title: 'Generate Parentheses',
+      description: 'Generate all combinations of n pairs of well-formed parentheses.',
+      difficulty: 'medium',
+      test_cases: [{ input: { n: 3 } }],
+      expected_outputs: [{ output: ['((()))', '(()())', '(())()', '()(())', '()()()'] }],
+      constraints: '1 <= n <= 8',
+      examples: [{ input: { n: 3 }, output: ['((()))', '(()())', '(())()', '()(())', '()()()'], explanation: 'Track open and close counts.' }]
+    },
+    {
+      title: 'Permutations',
+      description: 'Given an array of distinct integers, return all possible permutations.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [1, 2, 3] } }],
+      expected_outputs: [{ output: [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]] }],
+      constraints: '1 <= nums.length <= 6',
+      examples: [{ input: { nums: [1, 2, 3] }, output: [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]], explanation: 'Use backtracking with swap/visited.' }]
+    },
+    {
+      title: 'Subsets',
+      description: 'Given an integer array nums of unique elements, return all possible subsets.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [1, 2, 3] } }],
+      expected_outputs: [{ output: [[], [1], [2], [3], [1, 2], [1, 3], [2, 3], [1, 2, 3]] }],
+      constraints: '1 <= nums.length <= 10',
+      examples: [{ input: { nums: [1, 2, 3] }, output: [[], [1], [2], [3], [1, 2], [1, 3], [2, 3], [1, 2, 3]], explanation: 'Each element can be picked or skipped.' }]
+    },
+    {
+      title: 'Word Search',
+      description: 'Given a 2D board and a word, return true if the word exists in the grid.',
+      difficulty: 'medium',
+      test_cases: [{ input: { board: [['A', 'B', 'C', 'E'], ['S', 'F', 'C', 'S'], ['A', 'D', 'E', 'E']], word: 'ABCCED' } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= m, n <= 6',
+      examples: [{ input: { board: [['A', 'B', 'C', 'E'], ['S', 'F', 'C', 'S'], ['A', 'D', 'E', 'E']], word: 'ABCCED' }, output: true, explanation: 'DFS with backtracking over neighbors.' }]
+    },
+    {
+      title: 'Number of Islands',
+      description: 'Given a grid of 1s and 0s, count the number of islands.',
+      difficulty: 'medium',
+      test_cases: [{ input: { grid: [['1', '1', '1', '1', '0'], ['1', '1', '0', '1', '0'], ['1', '1', '0', '0', '0'], ['0', '0', '0', '0', '0']] } }],
+      expected_outputs: [{ output: 1 }],
+      constraints: '1 <= m, n <= 300',
+      examples: [{ input: { grid: [['1', '1', '1', '1', '0'], ['1', '1', '0', '1', '0'], ['1', '1', '0', '0', '0'], ['0', '0', '0', '0', '0']] }, output: 1, explanation: 'Flood fill connected land.' }]
+    },
+    {
+      title: 'Rotting Oranges',
+      description: 'Given a grid, return minimum minutes until all fresh oranges become rotten.',
+      difficulty: 'medium',
+      test_cases: [{ input: { grid: [[2, 1, 1], [1, 1, 0], [0, 1, 1]] } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: '1 <= m, n <= 10',
+      examples: [{ input: { grid: [[2, 1, 1], [1, 1, 0], [0, 1, 1]] }, output: 4, explanation: 'Multi-source BFS by minute layers.' }]
+    },
+    {
+      title: 'Course Schedule',
+      description: 'Return true if you can finish all courses given prerequisite pairs.',
+      difficulty: 'medium',
+      test_cases: [{ input: { numCourses: 2, prerequisites: [[1, 0]] } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= numCourses <= 2000',
+      examples: [{ input: { numCourses: 2, prerequisites: [[1, 0]] }, output: true, explanation: 'Graph has no cycle.' }]
+    },
+    {
+      title: 'Pacific Atlantic Water Flow',
+      description: 'Return coordinates where water can flow to both Pacific and Atlantic oceans.',
+      difficulty: 'medium',
+      test_cases: [{ input: { heights: [[1, 2, 2, 3, 5], [3, 2, 3, 4, 4], [2, 4, 5, 3, 1], [6, 7, 1, 4, 5], [5, 1, 1, 2, 4]] } }],
+      expected_outputs: [{ output: [[0, 4], [1, 3], [1, 4], [2, 2], [3, 0], [3, 1], [4, 0]] }],
+      constraints: '1 <= m, n <= 200',
+      examples: [{ input: { heights: [[1, 2, 2, 3, 5], [3, 2, 3, 4, 4], [2, 4, 5, 3, 1], [6, 7, 1, 4, 5], [5, 1, 1, 2, 4]] }, output: [[0, 4], [1, 3], [1, 4], [2, 2], [3, 0], [3, 1], [4, 0]], explanation: 'Run reverse BFS/DFS from both oceans.' }]
+    },
+    {
+      title: 'Coin Change',
+      description: 'Given coin denominations and amount, return minimum coins needed to make amount.',
+      difficulty: 'medium',
+      test_cases: [{ input: { coins: [1, 2, 5], amount: 11 } }],
+      expected_outputs: [{ output: 3 }],
+      constraints: '1 <= coins.length <= 12',
+      examples: [{ input: { coins: [1, 2, 5], amount: 11 }, output: 3, explanation: '11 = 5 + 5 + 1.' }]
+    },
+    {
+      title: 'House Robber',
+      description: 'Given money in houses in a line, return max amount without robbing adjacent houses.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [2, 7, 9, 3, 1] } }],
+      expected_outputs: [{ output: 12 }],
+      constraints: '1 <= nums.length <= 100',
+      examples: [{ input: { nums: [2, 7, 9, 3, 1] }, output: 12, explanation: 'Rob houses with values 2, 9, and 1.' }]
+    },
+    {
+      title: 'House Robber II',
+      description: 'Same as House Robber but houses are in a circle.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [2, 3, 2] } }],
+      expected_outputs: [{ output: 3 }],
+      constraints: '1 <= nums.length <= 100',
+      examples: [{ input: { nums: [2, 3, 2] }, output: 3, explanation: 'Cannot rob first and last together.' }]
+    },
+    {
+      title: 'Decode Ways',
+      description: 'Given a string of digits, return number of ways to decode where A=1, B=2, ..., Z=26.',
+      difficulty: 'medium',
+      test_cases: [{ input: { s: '226' } }],
+      expected_outputs: [{ output: 3 }],
+      constraints: '1 <= s.length <= 100',
+      examples: [{ input: { s: '226' }, output: 3, explanation: 'Possible decodes: BZ, VF, BBF.' }]
+    },
+    {
+      title: 'Unique Paths',
+      description: 'Count unique paths from top-left to bottom-right in an m x n grid moving only down or right.',
+      difficulty: 'medium',
+      test_cases: [{ input: { m: 3, n: 7 } }],
+      expected_outputs: [{ output: 28 }],
+      constraints: '1 <= m, n <= 100',
+      examples: [{ input: { m: 3, n: 7 }, output: 28, explanation: 'Dynamic programming over grid cells.' }]
+    },
+    {
+      title: 'Jump Game',
+      description: 'Given nums where each value is max jump length at index, return whether end is reachable.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [2, 3, 1, 1, 4] } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= nums.length <= 10^4',
+      examples: [{ input: { nums: [2, 3, 1, 1, 4] }, output: true, explanation: 'Greedy furthest-reach works.' }]
+    },
+    {
+      title: 'Partition Equal Subset Sum',
+      description: 'Return true if array can be partitioned into two subsets with equal sum.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [1, 5, 11, 5] } }],
+      expected_outputs: [{ output: true }],
+      constraints: '1 <= nums.length <= 200',
+      examples: [{ input: { nums: [1, 5, 11, 5] }, output: true, explanation: 'Can split into [1,5,5] and [11].' }]
+    },
+    {
+      title: 'Longest Increasing Subsequence',
+      description: 'Given nums, return the length of the longest strictly increasing subsequence.',
+      difficulty: 'medium',
+      test_cases: [{ input: { nums: [10, 9, 2, 5, 3, 7, 101, 18] } }],
+      expected_outputs: [{ output: 4 }],
+      constraints: '1 <= nums.length <= 2500',
+      examples: [{ input: { nums: [10, 9, 2, 5, 3, 7, 101, 18] }, output: 4, explanation: 'One LIS is [2,3,7,101].' }]
+    },
+    {
+      title: 'Edit Distance',
+      description: 'Return minimum number of operations to convert word1 to word2.',
+      difficulty: 'hard',
+      test_cases: [{ input: { word1: 'horse', word2: 'ros' } }],
+      expected_outputs: [{ output: 3 }],
+      constraints: '0 <= word1.length, word2.length <= 500',
+      examples: [{ input: { word1: 'horse', word2: 'ros' }, output: 3, explanation: 'Replace, remove, remove.' }]
+    },
+    {
+      title: 'Min Cost Climbing Stairs',
+      description: 'Given cost where you can climb 1 or 2 steps, return minimum cost to reach the top.',
+      difficulty: 'easy',
+      test_cases: [{ input: { cost: [10, 15, 20] } }],
+      expected_outputs: [{ output: 15 }],
+      constraints: '2 <= cost.length <= 1000',
+      examples: [{ input: { cost: [10, 15, 20] }, output: 15, explanation: 'Start at index 1 then jump to top.' }]
+    },
+    {
+      title: 'LRU Cache',
+      description: 'Design a data structure that follows the Least Recently Used cache policy.',
+      difficulty: 'medium',
+      test_cases: [{ input: { operations: ['LRUCache', 'put', 'put', 'get', 'put', 'get', 'put', 'get', 'get', 'get'], arguments: [[2], [1, 1], [2, 2], [1], [3, 3], [2], [4, 4], [1], [3], [4]] } }],
+      expected_outputs: [{ output: [null, null, null, 1, null, -1, null, -1, 3, 4] }],
+      constraints: '1 <= capacity <= 3000',
+      examples: [{ input: { operations: ['LRUCache', 'put', 'put', 'get'], arguments: [[2], [1, 1], [2, 2], [1]] }, output: [null, null, null, 1], explanation: 'Use hashmap + doubly linked list.' }]
+    },
+    {
+      title: 'Implement Trie',
+      description: 'Implement a trie with insert, search, and startsWith operations.',
+      difficulty: 'medium',
+      test_cases: [{ input: { operations: ['Trie', 'insert', 'search', 'search', 'startsWith'], arguments: [[], ['apple'], ['apple'], ['app'], ['app']] } }],
+      expected_outputs: [{ output: [null, null, true, false, true] }],
+      constraints: '1 <= word.length <= 2000',
+      examples: [{ input: { operations: ['Trie', 'insert', 'search'], arguments: [[], ['apple'], ['apple']] }, output: [null, null, true], explanation: 'Trie nodes store child links by character.' }]
+    },
+    {
+      title: 'Add and Search Word',
+      description: 'Design a structure that supports adding words and searching with "." wildcard.',
+      difficulty: 'medium',
+      test_cases: [{ input: { operations: ['WordDictionary', 'addWord', 'addWord', 'addWord', 'search', 'search', 'search', 'search'], arguments: [[], ['bad'], ['dad'], ['mad'], ['pad'], ['bad'], ['.ad'], ['b..']] } }],
+      expected_outputs: [{ output: [null, null, null, null, false, true, true, true] }],
+      constraints: '1 <= word.length <= 500',
+      examples: [{ input: { operations: ['WordDictionary', 'addWord', 'search'], arguments: [[], ['bad'], ['b..']] }, output: [null, null, true], explanation: 'Wildcard can match any single character.' }]
+    },
+    {
+      title: 'Linked List Cycle',
+      description: 'Given the head of a linked list, return true if there is a cycle.',
+      difficulty: 'easy',
+      test_cases: [{ input: { head: [3, 2, 0, -4], pos: 1 } }],
+      expected_outputs: [{ output: true }],
+      constraints: '0 <= number of nodes <= 10^4',
+      examples: [{ input: { head: [3, 2, 0, -4], pos: 1 }, output: true, explanation: 'Tail links back to node index 1.' }]
+    },
+    {
+      title: 'Binary Tree Level Order Traversal',
+      description: 'Given the root of a binary tree, return level-order traversal of node values.',
+      difficulty: 'medium',
+      test_cases: [{ input: { root: [3, 9, 20, null, null, 15, 7] } }],
+      expected_outputs: [{ output: [[3], [9, 20], [15, 7]] }],
+      constraints: '0 <= number of nodes <= 2000',
+      examples: [{ input: { root: [3, 9, 20, null, null, 15, 7] }, output: [[3], [9, 20], [15, 7]], explanation: 'Use BFS queue by levels.' }]
     }
   ];
 
+  let insertedCount = 0;
+
   for (const problem of problems) {
     try {
-      await dbPool.query(
+      const insertResult = await dbPool.query(
         `INSERT INTO problems (title, description, difficulty, test_cases, expected_outputs, constraints, examples)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT DO NOTHING`,
-        [problem.title, problem.description, problem.difficulty, problem.test_cases, problem.expected_outputs, problem.constraints, problem.examples]
+        [
+          problem.title,
+          problem.description,
+          problem.difficulty,
+          JSON.stringify(problem.test_cases),
+          JSON.stringify(problem.expected_outputs),
+          problem.constraints,
+          JSON.stringify(problem.examples)
+        ]
       );
+      insertedCount += insertResult.rowCount || 0;
     } catch (e) {
       // Ignore duplicate errors
     }
   }
+
+  return insertedCount;
 };
 
 /**
@@ -735,6 +1109,14 @@ const runMigrations = async () => {
     console.log('  ✅ Unique problem-title index ensured');
   } catch (error) {
     console.error(`  ❌ Unique problem-title index: ${error.message}`);
+  }
+
+  // Backfill any missing catalog problems for existing databases
+  try {
+    const insertedCount = await seedProblems(dbPool);
+    console.log(`  ✅ Seeded ${insertedCount} new problems from catalog`);
+  } catch (error) {
+    console.error(`  ❌ Problem catalog seed: ${error.message}`);
   }
   
   console.log('✅ Migrations complete\n');
