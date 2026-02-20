@@ -1,32 +1,25 @@
 /**
- * Email Service — Nodemailer + Gmail SMTP
+ * Email Service — SendGrid HTTP API
+ * Uses @sendgrid/mail (HTTPS on port 443 — works on Render)
  */
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 
-// Create a reusable transporter using Gmail SMTP
-const createTransporter = () => {
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!user || !pass) {
-    throw new Error('SMTP_USER and SMTP_PASS must be set in .env');
+const getClient = () => {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) {
+    throw new Error('SENDGRID_API_KEY environment variable is not set');
   }
-
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false, // true for 465, false for 587 (STARTTLS)
-    auth: { user, pass },
-  });
+  sgMail.setApiKey(apiKey);
+  return sgMail;
 };
 
 /**
- * Send OTP email via Gmail SMTP using Nodemailer
+ * Send OTP email via SendGrid
  */
 async function sendOTPEmail(email, otp, type = 'signup') {
-  const transporter = createTransporter();
+  const client = getClient();
 
-  const from = `"ThinkFlow" <${process.env.SMTP_USER}>`;
+  const from = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
 
   const subject = type === 'signup'
     ? 'Verify your ThinkFlow account'
@@ -56,22 +49,24 @@ async function sendOTPEmail(email, otp, type = 'signup') {
     </div>
   `;
 
-  console.log(`📧 Sending OTP email via Gmail SMTP to: ${email}`);
+  const msg = {
+    to: email,
+    from,                // must be verified in SendGrid Single Sender
+    subject,
+    html,
+    text: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`,
+  };
+
+  console.log(`📧 Sending OTP email via SendGrid to: ${email}`);
 
   try {
-    const info = await transporter.sendMail({
-      from,
-      to: email,
-      subject,
-      html,
-      text: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`,
-    });
-
-    console.log('✅ OTP email sent via Gmail SMTP, messageId:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    const [response] = await client.send(msg);
+    console.log('✅ OTP email sent via SendGrid, status:', response.statusCode);
+    return { success: true, statusCode: response.statusCode };
   } catch (err) {
-    console.error('❌ Failed to send OTP email via SMTP:', err.message);
-    throw err;
+    const errBody = err.response?.body || err.message;
+    console.error('❌ SendGrid error:', errBody);
+    throw new Error(typeof errBody === 'object' ? JSON.stringify(errBody) : errBody);
   }
 }
 

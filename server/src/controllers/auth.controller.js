@@ -101,11 +101,11 @@ const signup = async (req, res) => {
       });
     }
 
-    // Check if email service is configured (Gmail SMTP via Nodemailer)
-    const smtpConfigured = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
-    const emailConfigured = smtpConfigured;
+    // Check if email service is configured (SendGrid HTTP API)
+    const sendgridConfigured = !!process.env.SENDGRID_API_KEY;
+    const emailConfigured = sendgridConfigured;
 
-    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (Gmail SMTP: ${smtpConfigured})`);
+    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (SendGrid: ${sendgridConfigured})`);
 
     if (!emailConfigured) {
       // No email service configured - return error, don't auto-verify
