@@ -101,11 +101,11 @@ const signup = async (req, res) => {
       });
     }
 
-    // Check if email service is configured (Brevo HTTP API)
-    const brevoConfigured = !!process.env.BREVO_API_KEY;
-    const emailConfigured = brevoConfigured;
+    // Check if email service is configured (Gmail SMTP via Nodemailer)
+    const smtpConfigured = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+    const emailConfigured = smtpConfigured;
 
-    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (Brevo: ${brevoConfigured})`);
+    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (Gmail SMTP: ${smtpConfigured})`);
 
     if (!emailConfigured) {
       // No email service configured - return error, don't auto-verify

@@ -1,18 +1,32 @@
 /**
- * Email Service — Brevo (formerly Sendinblue) HTTP API
- * Uses the Transactional Email API (no SMTP, works on Render)
+ * Email Service — Nodemailer + Gmail SMTP
  */
+const nodemailer = require('nodemailer');
 
-const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+// Create a reusable transporter using Gmail SMTP
+const createTransporter = () => {
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
 
-async function sendOTPEmail(email, otp, type = 'signup') {
-  const apiKey = process.env.BREVO_API_KEY;
-  if (!apiKey) {
-    throw new Error('BREVO_API_KEY environment variable is not set');
+  if (!user || !pass) {
+    throw new Error('SMTP_USER and SMTP_PASS must be set in .env');
   }
 
-  const senderName = 'ThinkFlow';
-  const senderEmail = process.env.EMAIL_FROM_ADDRESS || 'noreply@thinkflow.app';
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: false, // true for 465, false for 587 (STARTTLS)
+    auth: { user, pass },
+  });
+};
+
+/**
+ * Send OTP email via Gmail SMTP using Nodemailer
+ */
+async function sendOTPEmail(email, otp, type = 'signup') {
+  const transporter = createTransporter();
+
+  const from = `"ThinkFlow" <${process.env.SMTP_USER}>`;
 
   const subject = type === 'signup'
     ? 'Verify your ThinkFlow account'
@@ -42,35 +56,23 @@ async function sendOTPEmail(email, otp, type = 'signup') {
     </div>
   `;
 
-  const payload = {
-    sender: { name: senderName, email: senderEmail },
-    to: [{ email }],
-    subject,
-    htmlContent: html,
-    textContent: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`
-  };
+  console.log(`📧 Sending OTP email via Gmail SMTP to: ${email}`);
 
-  console.log(`📧 Sending OTP email via Brevo to: ${email}`);
+  try {
+    const info = await transporter.sendMail({
+      from,
+      to: email,
+      subject,
+      html,
+      text: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`,
+    });
 
-  const response = await fetch(BREVO_API_URL, {
-    method: 'POST',
-    headers: {
-      'accept': 'application/json',
-      'content-type': 'application/json',
-      'api-key': apiKey
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error('❌ Brevo API error:', data);
-    throw new Error(data.message || `Brevo API responded with status ${response.status}`);
+    console.log('✅ OTP email sent via Gmail SMTP, messageId:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.error('❌ Failed to send OTP email via SMTP:', err.message);
+    throw err;
   }
-
-  console.log('✅ OTP email sent via Brevo, messageId:', data.messageId);
-  return { success: true, messageId: data.messageId };
 }
 
 module.exports = { sendOTPEmail };
