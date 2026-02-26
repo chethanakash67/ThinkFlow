@@ -77,9 +77,17 @@ const resendOTPValidation = [
     .withMessage('Invalid OTP type'),
 ];
 
+const googleSigninValidation = [
+  body('idToken')
+    .isString()
+    .notEmpty()
+    .withMessage('Google ID token is required'),
+];
+
 // Routes
 router.post('/signup', signupValidation, authController.signup);
 router.post('/signin', signinValidation, authController.signin);
+router.post('/google-signin', googleSigninValidation, authController.googleSignin);
 router.post('/verify-otp', verifyOTPValidation, authController.verifyOTP);
 router.post('/resend-otp', resendOTPValidation, authController.resendOTP);
 router.get('/me', authenticateToken, authController.getMe);

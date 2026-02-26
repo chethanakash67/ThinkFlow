@@ -18,6 +18,7 @@ interface AuthContextType {
   isAuthenticated: boolean
   loading: boolean
   login: (email: string, password: string) => Promise<void>
+  googleLogin: (idToken: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -81,6 +82,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const googleLogin = async (idToken: string) => {
+    try {
+      const response = await api.post('/auth/google-signin', { idToken })
+
+      if (response.data.success && response.data.token) {
+        setToken(response.data.token)
+        setUser(response.data.user)
+        await new Promise(resolve => setTimeout(resolve, 100))
+        router.push('/dashboard')
+      } else {
+        throw new Error(response.data.error || 'Google sign-in failed')
+      }
+    } catch (err: any) {
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        throw new Error('Request timed out. The server may be starting up. Please try again.')
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        throw new Error('Cannot connect to server. Please check your internet connection.')
+      }
+      throw err
+    }
+  }
+
   const logout = () => {
     removeToken()
     setUser(null)
@@ -96,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !!user,
     loading,
     login,
+    googleLogin,
     logout,
     refreshUser,
   }

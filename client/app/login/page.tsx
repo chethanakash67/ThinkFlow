@@ -1,14 +1,18 @@
 'use client';
 
 import './login.css';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/context/auth.context';
 
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
 export default function LoginPage() {
-  const router = useRouter();
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -16,6 +20,9 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Signing in...');
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
   // Update loading message for long requests (Render cold start)
   useEffect(() => {
@@ -38,6 +45,62 @@ export default function LoginPage() {
       clearTimeout(timer2);
     };
   }, [loading]);
+
+  useEffect(() => {
+    if (!googleClientId || typeof window === 'undefined' || !googleButtonRef.current) {
+      return;
+    }
+
+    const initializeGoogle = () => {
+      if (!window.google || !googleButtonRef.current) {
+        return;
+      }
+
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async (response: { credential?: string }) => {
+          if (!response?.credential) {
+            setError('Google sign-in failed. Please try again.');
+            return;
+          }
+
+          setError('');
+          setLoading(true);
+          setLoadingMessage('Signing in with Google...');
+
+          try {
+            await googleLogin(response.credential);
+          } catch (err: any) {
+            const message = err.response?.data?.error || err.message || 'Google sign-in failed. Please try again.';
+            setError(message);
+          } finally {
+            setLoading(false);
+          }
+        },
+      });
+
+      googleButtonRef.current.innerHTML = '';
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: 'outline',
+        size: 'large',
+        width: 360,
+        text: 'continue_with',
+      });
+      setGoogleEnabled(true);
+    };
+
+    if (window.google) {
+      initializeGoogle();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = initializeGoogle;
+    document.head.appendChild(script);
+  }, [googleClientId, googleLogin]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,6 +275,24 @@ export default function LoginPage() {
           <button type="submit" disabled={loading} className="submit-button">
             {loading ? loadingMessage : 'Sign In'}
           </button>
+
+          <div className="social-auth-panel">
+            <div className="social-divider">
+              <span>or continue with</span>
+            </div>
+            {googleClientId ? (
+              <div className="google-button-shell">
+                <div className="google-button-wrapper">
+                  <div ref={googleButtonRef} />
+                </div>
+              </div>
+            ) : (
+              <p className="google-help-text">Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` to enable Google sign-in.</p>
+            )}
+            {googleClientId && !googleEnabled && (
+              <p className="google-help-text">Loading Google sign-in...</p>
+            )}
+          </div>
         </form>
       </div>
     </div>

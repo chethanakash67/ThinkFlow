@@ -3,6 +3,7 @@
  * Handles user registration, login, and authentication-related operations with OTP verification
  */
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
@@ -10,6 +11,17 @@ const nodemailer = require('nodemailer');
 
 
 const { sendOTPEmail } = require('../services/emailService');
+let OAuth2Client;
+try {
+  ({ OAuth2Client } = require('google-auth-library'));
+} catch (error) {
+  OAuth2Client = null;
+}
+
+const googleClient = process.env.GOOGLE_CLIENT_ID
+  && OAuth2Client
+  ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
+  : null;
 
 /**
  * Generate 6-digit OTP
@@ -393,6 +405,112 @@ const signin = async (req, res) => {
 };
 
 /**
+ * Google Sign-In
+ * POST /api/auth/google-signin
+ */
+const googleSignin = async (req, res) => {
+  try {
+    if (!OAuth2Client) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google sign-in dependency is missing. Install server dependencies and try again.'
+      });
+    }
+
+    if (!googleClient || !process.env.GOOGLE_CLIENT_ID) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google sign-in is not configured.'
+      });
+    }
+
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google ID token is required'
+      });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google account email is missing'
+      });
+    }
+
+    if (!payload.email_verified) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google email is not verified'
+      });
+    }
+
+    const normalizedEmail = payload.email.trim().toLowerCase();
+    const googleName = (payload.name || normalizedEmail.split('@')[0]).trim();
+
+    let userResult = await query(
+      'SELECT id, name, email, role, email_verified FROM users WHERE email = $1',
+      [normalizedEmail]
+    );
+
+    let user;
+    if (userResult.rows.length > 0) {
+      user = userResult.rows[0];
+
+      if (!user.email_verified) {
+        await query(
+          `UPDATE users
+           SET email_verified = TRUE, otp_code = NULL, otp_expires = NULL, otp_type = NULL
+           WHERE id = $1`,
+          [user.id]
+        );
+        user.email_verified = true;
+      }
+    } else {
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(randomPassword, 10);
+
+      const createdUser = await query(
+        `INSERT INTO users (name, email, password_hash, email_verified)
+         VALUES ($1, $2, $3, TRUE)
+         RETURNING id, name, email, role, email_verified`,
+        [googleName, normalizedEmail, passwordHash]
+      );
+
+      user = createdUser.rows[0];
+    }
+
+    const token = generateToken(user.id);
+
+    return res.json({
+      success: true,
+      message: 'Google sign-in successful',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        emailVerified: user.email_verified,
+      },
+    });
+  } catch (error) {
+    console.error('\n❌ Google signin error:', error.message);
+    return res.status(401).json({
+      success: false,
+      error: 'Google sign-in failed. Please try again.'
+    });
+  }
+};
+
+/**
  * Get Current User
  * GET /api/auth/me (protected)
  */
@@ -636,6 +754,7 @@ const verifyResetOtp = async (req, res) => {
 module.exports = {
   signup,
   signin,
+  googleSignin,
   getMe,
   verifyOTP,
   resendOTP,
