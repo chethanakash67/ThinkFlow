@@ -44,11 +44,9 @@ export default function ProblemDetailPage() {
   const [loadingSuggestion, setLoadingSuggestion] = useState(false)
   const [editorInstance, setEditorInstance] = useState<any>(null)
   const [syntaxErrors, setSyntaxErrors] = useState<any[]>([])
-  const [showAIHelpPanel, setShowAIHelpPanel] = useState(false)
-  const [aiHelpQuestion, setAiHelpQuestion] = useState('')
-  const [aiHelpResponse, setAiHelpResponse] = useState<any>(null)
-  const [loadingAIHelp, setLoadingAIHelp] = useState(false)
   const [editorHints, setEditorHints] = useState<EditorHint[]>([])
+  const [codeAnalysis, setCodeAnalysis] = useState<any>(null)
+  const [analyzingCode, setAnalyzingCode] = useState(false)
   const [logicHistory, setLogicHistory] = useState<any[]>([])
   const [codeHistory, setCodeHistory] = useState<any[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
@@ -539,27 +537,27 @@ export default function ProblemDetailPage() {
     setCode(editorInstance.getValue())
   }
 
-  const handleAskAIHelp = async () => {
-    setLoadingAIHelp(true)
-    setAiHelpResponse(null)
+  const handleAnalyzeCode = async () => {
+    setAnalyzingCode(true)
+    setCodeAnalysis(null)
     try {
       const response = await api.post(`/problems/${problemId}/ai-help`, {
-        question: aiHelpQuestion.trim() || 'Review my current code and suggest next steps',
+        question: 'Analyze my current code and suggest targeted fixes and edge-case checks.',
         code,
         language,
         logicSteps: logicSteps.map(({ step_number, ...rest }) => rest)
       })
-      setAiHelpResponse(response.data.help)
+      setCodeAnalysis(response.data.help)
     } catch (error: any) {
-      console.error('Failed to get AI help:', error)
-      setAiHelpResponse({
-        answer: error.response?.data?.error || 'Unable to fetch AI help right now.',
+      console.error('Failed to analyze code:', error)
+      setCodeAnalysis({
+        answer: error.response?.data?.error || 'Unable to analyze code right now.',
         hints: [],
         nextSteps: [],
         warnings: []
       })
     } finally {
-      setLoadingAIHelp(false)
+      setAnalyzingCode(false)
     }
   }
 
@@ -888,10 +886,12 @@ export default function ProblemDetailPage() {
                   <span className="code-editor-title">Code Editor</span>
                   <div className="code-editor-controls">
                     <button
-                      onClick={() => setShowAIHelpPanel((prev) => !prev)}
-                      className="code-ai-help-btn"
+                      type="button"
+                      onClick={handleAnalyzeCode}
+                      disabled={analyzingCode}
+                      className="code-analyze-btn"
                     >
-                      <FaRobot /> {showAIHelpPanel ? 'Hide AI Help' : 'AI Help'}
+                      <FaRobot /> {analyzingCode ? 'Analyzing...' : 'Analyze Code'}
                     </button>
                     <select 
                       value={language} 
@@ -931,52 +931,37 @@ export default function ProblemDetailPage() {
                     ))}
                   </div>
                 </div>
-                {showAIHelpPanel && (
-                  <div className="ai-help-panel">
-                    <div className="ai-help-title"><FaRobot /> AI Help Assistant</div>
-                    <p className="ai-help-subtitle">
-                      Ask for debugging guidance, optimization ideas, or edge-case checks based on your current code.
-                    </p>
-                    <textarea
-                      className="ai-help-input"
-                      value={aiHelpQuestion}
-                      onChange={(e) => setAiHelpQuestion(e.target.value)}
-                      placeholder="Example: Why does my loop miss edge cases for empty arrays?"
-                    />
-                    <button
-                      className="ai-help-ask-btn"
-                      onClick={handleAskAIHelp}
-                      disabled={loadingAIHelp}
-                    >
-                      <FaRobot /> {loadingAIHelp ? 'Analyzing...' : 'Ask AI Help'}
-                    </button>
-                    {aiHelpResponse && (
-                      <div className="ai-help-response">
-                        <div className="ai-help-answer">{aiHelpResponse.answer}</div>
-                        {Array.isArray(aiHelpResponse.hints) && aiHelpResponse.hints.length > 0 && (
-                          <div className="ai-help-list-block">
-                            <div className="ai-help-list-title">Hints</div>
-                            {aiHelpResponse.hints.map((hint: string, idx: number) => (
-                              <div key={`hint-${idx}`} className="ai-help-item">• {hint}</div>
-                            ))}
-                          </div>
-                        )}
-                        {Array.isArray(aiHelpResponse.nextSteps) && aiHelpResponse.nextSteps.length > 0 && (
-                          <div className="ai-help-list-block">
-                            <div className="ai-help-list-title">Next Steps</div>
-                            {aiHelpResponse.nextSteps.map((step: string, idx: number) => (
-                              <div key={`step-${idx}`} className="ai-help-item">• {step}</div>
-                            ))}
-                          </div>
-                        )}
-                        {Array.isArray(aiHelpResponse.warnings) && aiHelpResponse.warnings.length > 0 && (
-                          <div className="ai-help-list-block">
-                            <div className="ai-help-list-title">Watchouts</div>
-                            {aiHelpResponse.warnings.map((warning: string, idx: number) => (
-                              <div key={`warning-${idx}`} className="ai-help-item warning">• {warning}</div>
-                            ))}
-                          </div>
-                        )}
+                {codeAnalysis && (
+                  <div className="code-analysis-panel">
+                    <div className="code-analysis-title"><FaRobot /> Code Analysis Suggestions</div>
+                    {codeAnalysis.source && (
+                      <div className="code-analysis-source">Source: {codeAnalysis.source}</div>
+                    )}
+                    {codeAnalysis.answer && (
+                      <div className="code-analysis-answer">{codeAnalysis.answer}</div>
+                    )}
+                    {Array.isArray(codeAnalysis.hints) && codeAnalysis.hints.length > 0 && (
+                      <div className="code-analysis-block">
+                        <div className="code-analysis-block-title">Hints</div>
+                        {codeAnalysis.hints.map((hint: string, idx: number) => (
+                          <div key={`analysis-hint-${idx}`} className="code-analysis-item">• {hint}</div>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(codeAnalysis.nextSteps) && codeAnalysis.nextSteps.length > 0 && (
+                      <div className="code-analysis-block">
+                        <div className="code-analysis-block-title">Next Steps</div>
+                        {codeAnalysis.nextSteps.map((step: string, idx: number) => (
+                          <div key={`analysis-step-${idx}`} className="code-analysis-item">• {step}</div>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(codeAnalysis.warnings) && codeAnalysis.warnings.length > 0 && (
+                      <div className="code-analysis-block">
+                        <div className="code-analysis-block-title">Watchouts</div>
+                        {codeAnalysis.warnings.map((warning: string, idx: number) => (
+                          <div key={`analysis-warning-${idx}`} className="code-analysis-item warning">• {warning}</div>
+                        ))}
                       </div>
                     )}
                   </div>

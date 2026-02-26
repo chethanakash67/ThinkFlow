@@ -1,5 +1,6 @@
 const { query } = require('../src/config/db');
 const { generateAIHelp } = require('../services/aiHelpService');
+const { generateReasoningEvaluation } = require('../services/reasoningModelService');
 
 const getDedupedProblemsQuery = (hasDifficultyFilter) => {
   const whereClause = hasDifficultyFilter ? 'WHERE difficulty = $1' : '';
@@ -92,6 +93,29 @@ const getAIHelp = async (req, res) => {
   } catch (error) {
     console.error('AI help error:', error);
     res.status(500).json({ error: 'Failed to generate AI help' });
+  }
+};
+
+// Evaluate intended logic vs workflow using API-key powered reasoning model
+const evaluateReasoning = async (req, res) => {
+  try {
+    const { intendedLogic, structuredCodeFlow } = req.body || {};
+
+    if (!intendedLogic || !structuredCodeFlow) {
+      return res.status(400).json({
+        error: 'Both intendedLogic and structuredCodeFlow are required'
+      });
+    }
+
+    const evaluation = await generateReasoningEvaluation({
+      intendedLogic: String(intendedLogic),
+      structuredCodeFlow: String(structuredCodeFlow)
+    });
+
+    res.json({ evaluation });
+  } catch (error) {
+    console.error('Reasoning evaluation error:', error);
+    res.status(500).json({ error: 'Failed to evaluate reasoning workflow' });
   }
 };
 
@@ -212,6 +236,7 @@ module.exports = {
   getProblems,
   getProblemById,
   getAIHelp,
+  evaluateReasoning,
   createProblem,
   updateProblem,
   deleteProblem,
