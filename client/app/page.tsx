@@ -189,15 +189,15 @@ export default function LandingPage() {
           <div className="why-stats">
             <div className="stat-card">
               <span className="stat-label">Problems Solved</span>
-              <span className="stat-value stat-green">1,240+</span>
+              <span className="stat-value stat-green">15+</span>
             </div>
             <div className="stat-card">
               <span className="stat-label">Active Learners</span>
-              <span className="stat-value stat-blue">350+</span>
+              <span className="stat-value stat-blue">10+</span>
             </div>
             <div className="stat-card">
-              <span className="stat-label">Success Rate</span>
-              <span className="stat-value stat-purple">94%</span>
+              <span className="stat-label">Good Success Rate</span>
+              <span className="stat-value stat-purple"></span>
             </div>
           </div>
         </div>
