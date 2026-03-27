@@ -8,6 +8,7 @@ const {
 } = require('../src/services/emailService');
 
 const ADMIN_EMAIL = process.env.COMPETITION_ADMIN_EMAIL || 'chethanakash67@gmail.com';
+const COMPETITION_TIMEZONE_OFFSET_MINUTES = Number(process.env.COMPETITION_TIMEZONE_OFFSET_MINUTES || 330);
 const API_BASE_URL = (
   process.env.API_BASE_URL ||
   process.env.BACKEND_URL ||
@@ -23,14 +24,60 @@ const slugify = (value) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
 
+const buildDateFromSchedule = (dateValue, timeValue) => {
+  if (!dateValue || !timeValue) return null;
+
+  const normalizedDate = normalizeDatePart(dateValue);
+  const normalizedTime = String(timeValue || '').trim();
+  const dateMatch = normalizedDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = normalizedTime.match(/^(\d{2}):(\d{2})$/);
+
+  if (!dateMatch || !timeMatch) {
+    return null;
+  }
+
+  const [, year, month, day] = dateMatch;
+  const [, hours, minutes] = timeMatch;
+  const utcMillis =
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hours),
+      Number(minutes)
+    ) -
+    COMPETITION_TIMEZONE_OFFSET_MINUTES * 60 * 1000;
+
+  const parsedDate = new Date(utcMillis);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
 const getCompetitionStatus = (competition) => {
   if (competition.status === 'pending_approval' || competition.status === 'rejected') {
     return competition.status;
   }
 
   const now = Date.now();
-  const startAt = new Date(competition.start_at || competition.startAt).getTime();
-  const endAt = new Date(competition.end_at || competition.endAt).getTime();
+  let startAt = buildDateFromSchedule(
+    competition.competition_date || competition.competitionDate,
+    competition.start_time || competition.startTime
+  )?.getTime();
+  let endAt = buildDateFromSchedule(
+    competition.competition_date || competition.competitionDate,
+    competition.end_time || competition.endTime
+  )?.getTime();
+
+  if (Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt) {
+    endAt += 24 * 60 * 60 * 1000;
+  }
+
+  if (!Number.isFinite(startAt)) {
+    startAt = new Date(competition.start_at || competition.startAt).getTime();
+  }
+
+  if (!Number.isFinite(endAt)) {
+    endAt = new Date(competition.end_at || competition.endAt).getTime();
+  }
 
   if (Number.isFinite(endAt) && endAt <= now) return 'completed';
   if (Number.isFinite(startAt) && startAt <= now) return 'open';
@@ -105,17 +152,9 @@ const normalizeDatePart = (dateValue) => {
 };
 
 const buildCompetitionDateTime = (dateValue, timeValue) => {
-  const normalizedDate = normalizeDatePart(dateValue);
-  const normalizedTime = String(timeValue || '').trim();
+  const parsedDate = buildDateFromSchedule(dateValue, timeValue);
 
-  if (!/^\d{2}:\d{2}$/.test(normalizedTime)) {
-    throw new Error(`Invalid competition time: ${timeValue}`);
-  }
-
-  const isoString = `${normalizedDate}T${normalizedTime}:00`;
-  const parsedDate = new Date(isoString);
-
-  if (Number.isNaN(parsedDate.getTime())) {
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
     throw new Error(`Invalid date/time combination: ${dateValue} ${timeValue}`);
   }
 
@@ -278,7 +317,8 @@ const joinCompetition = async (req, res) => {
     const { competitionId } = req.params;
 
     const competitionResult = await query(
-      `SELECT c.id, c.title, c.status, c.max_participants, c.start_at, c.end_at
+      `SELECT c.id, c.title, c.status, c.max_participants, c.start_at, c.end_at,
+              cr.competition_date, cr.start_time, cr.end_time
        FROM competitions c
        JOIN competition_requests cr
          ON cr.approved_competition_id = c.id
