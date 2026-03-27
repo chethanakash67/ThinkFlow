@@ -4,6 +4,18 @@
  */
 const sgMail = require('@sendgrid/mail');
 
+const getSender = () => {
+  const email = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
+  const name = process.env.EMAIL_FROM_NAME || 'ThinkFlow';
+  return { email, name };
+};
+
+const getReplyTo = () => {
+  const email = process.env.EMAIL_REPLY_TO || process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
+  const name = process.env.EMAIL_FROM_NAME || 'ThinkFlow Support';
+  return { email, name };
+};
+
 const getClient = () => {
   const apiKey = process.env.SENDGRID_API_KEY;
   if (!apiKey) {
@@ -16,10 +28,30 @@ const getClient = () => {
 async function sendEmail(message) {
   const client = getClient();
 
+  const normalizedMessage = {
+    ...message,
+    from: message.from || getSender(),
+    replyTo: message.replyTo || getReplyTo(),
+    trackingSettings: {
+      clickTracking: { enable: false, enableText: false },
+      openTracking: { enable: false },
+      subscriptionTracking: { enable: false },
+      ...(message.trackingSettings || {}),
+    },
+    mailSettings: {
+      sandboxMode: { enable: false },
+      ...(message.mailSettings || {}),
+    },
+  };
+
   try {
-    const [response] = await client.send(message);
-    console.log('✅ Email sent via SendGrid, status:', response.statusCode);
-    return { success: true, statusCode: response.statusCode };
+    const [response] = await client.send(normalizedMessage);
+    console.log('✅ Email sent via SendGrid, status:', response.statusCode, 'message-id:', response.headers?.['x-message-id'] || 'n/a');
+    return {
+      success: true,
+      statusCode: response.statusCode,
+      messageId: response.headers?.['x-message-id'] || null,
+    };
   } catch (err) {
     const errBody = err.response?.body || err.message;
     console.error('❌ SendGrid error:', errBody);
@@ -31,13 +63,9 @@ async function sendEmail(message) {
  * Send OTP email via SendGrid
  */
 async function sendOTPEmail(email, otp, type = 'signup') {
-  const client = getClient();
-
-  const from = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
-
   const subject = type === 'signup'
-    ? 'Verify your ThinkFlow account'
-    : 'Reset your ThinkFlow password';
+    ? 'Your ThinkFlow verification code'
+    : 'Your ThinkFlow password reset code';
 
   const heading = type === 'signup'
     ? 'Welcome to ThinkFlow!'
@@ -53,22 +81,30 @@ async function sendOTPEmail(email, otp, type = 'signup') {
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #4f46e5;">${heading}</h2>
-      <p style="font-size: 16px;">${bodyLine}</p>
+      <h2 style="color: #4f46e5; margin-bottom: 12px;">${heading}</h2>
+      <p style="font-size: 16px; color: #334155; line-height: 1.6;">${bodyLine}</p>
       <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
         <h1 style="font-size: 48px; color: #4f46e5; letter-spacing: 10px; margin: 0;">${otp}</h1>
       </div>
-      <p style="color: #666;">This code will expire in 10 minutes.</p>
-      <p style="color: #999; font-size: 14px;">${footerNote}</p>
+      <p style="color: #475569; line-height: 1.6;">This code will expire in 10 minutes.</p>
+      <p style="color: #64748b; font-size: 14px; line-height: 1.6;">If you don&apos;t see this email in your inbox, please check your spam folder.</p>
+      <p style="color: #94a3b8; font-size: 13px; line-height: 1.6;">${footerNote}</p>
     </div>
   `;
 
   const msg = {
     to: email,
-    from,                // must be verified in SendGrid Single Sender
     subject,
     html,
-    text: `Your ThinkFlow ${type} verification code is: ${otp}. Valid for 10 minutes.`,
+    text: [
+      heading,
+      '',
+      `${bodyLine} ${otp}`,
+      'This code will expire in 10 minutes.',
+      "If you don't see this email in your inbox, please check your spam folder.",
+      footerNote,
+    ].join('\n'),
+    categories: ['thinkflow', 'transactional', type === 'signup' ? 'otp-signup' : 'otp-reset'],
   };
 
   console.log(`📧 Sending OTP email via SendGrid to: ${email}`);
@@ -92,8 +128,6 @@ async function sendCompetitionApprovalRequest({
   approveUrl,
   rejectUrl,
 }) {
-  const from = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
-
   const questionHtml = questions
     .map(
       (question, index) => `
@@ -108,7 +142,6 @@ async function sendCompetitionApprovalRequest({
 
   const msg = {
     to: adminEmail,
-    from,
     subject: `Competition approval needed: ${competitionName}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px;">
@@ -143,6 +176,7 @@ async function sendCompetitionApprovalRequest({
       `Approve: ${approveUrl}`,
       `Reject: ${rejectUrl}`,
     ].join('\n'),
+    categories: ['thinkflow', 'transactional', 'competition-approval'],
   };
 
   console.log(`📧 Sending competition approval email to admin: ${adminEmail}`);
@@ -156,7 +190,6 @@ async function sendCompetitionDecisionEmail({
   approved,
   reason,
 }) {
-  const from = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
   const subject = approved
     ? `Your ThinkFlow competition is live: ${competitionName}`
     : `Competition update: ${competitionName}`;
@@ -167,7 +200,6 @@ async function sendCompetitionDecisionEmail({
 
   return sendEmail({
     to: creatorEmail,
-    from,
     subject,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
@@ -176,6 +208,7 @@ async function sendCompetitionDecisionEmail({
       </div>
     `,
     text: `Hi ${creatorName},\n\n${message}`,
+    categories: ['thinkflow', 'transactional', approved ? 'competition-approved' : 'competition-rejected'],
   });
 }
 
