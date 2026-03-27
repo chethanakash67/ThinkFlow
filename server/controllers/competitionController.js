@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const { query } = require('../src/config/db');
+const { query, pool } = require('../src/config/db');
 const { getLeaderboard } = require('../services/gamificationService');
 const {
   sendCompetitionApprovalRequest,
@@ -73,6 +73,17 @@ const buildCompetitionDescription = (questions) => {
   }
 
   return `Tackle ${questions.length} custom challenge${questions.length > 1 ? 's' : ''} across practical problem-solving scenarios.`;
+};
+
+const buildCompetitionDateTime = (dateValue, timeValue) => {
+  const isoString = `${dateValue}T${timeValue}:00`;
+  const parsedDate = new Date(isoString);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new Error(`Invalid date/time combination: ${dateValue} ${timeValue}`);
+  }
+
+  return parsedDate;
 };
 
 const normalizeQuestions = (questions = []) =>
@@ -459,6 +470,9 @@ const getLeaderboardOverview = async (req, res) => {
 };
 
 const approveCompetitionRequest = async (req, res) => {
+  const db = pool();
+  let client = null;
+
   try {
     const { token } = req.query;
     if (!token) {
@@ -489,13 +503,21 @@ const approveCompetitionRequest = async (req, res) => {
       [request.id]
     );
 
+    client = await db.connect();
+    await client.query('BEGIN');
+
     const slugBase = slugify(request.competition_name) || `competition-${request.id}`;
     const uniqueSlug = `${slugBase}-${request.id}`;
-    const startAt = new Date(`${request.competition_date}T${request.start_time}`);
-    const endAt = new Date(`${request.competition_date}T${request.end_time}`);
+    const startAt = buildCompetitionDateTime(request.competition_date, request.start_time);
+    let endAt = buildCompetitionDateTime(request.competition_date, request.end_time);
+
+    if (endAt <= startAt) {
+      endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+    }
+
     const status = endAt <= new Date() ? 'completed' : startAt <= new Date() ? 'open' : 'upcoming';
 
-    const competitionResult = await query(
+    const competitionResult = await client.query(
       `INSERT INTO competitions (
          title,
          slug,
@@ -524,7 +546,7 @@ const approveCompetitionRequest = async (req, res) => {
     const competitionId = competitionResult.rows[0].id;
 
     for (const question of questionsResult.rows) {
-      const problemResult = await query(
+      const insertProblemResult = await client.query(
         `INSERT INTO problems (
            title,
            description,
@@ -535,6 +557,7 @@ const approveCompetitionRequest = async (req, res) => {
            examples
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT DO NOTHING
          RETURNING id`,
         [
           question.title,
@@ -564,20 +587,42 @@ const approveCompetitionRequest = async (req, res) => {
         ]
       );
 
+      let problemId = insertProblemResult.rows[0]?.id;
+
+      if (!problemId) {
+        const existingProblemResult = await client.query(
+          `SELECT id
+           FROM problems
+           WHERE LOWER(BTRIM(title)) = LOWER(BTRIM($1))
+           LIMIT 1`,
+          [question.title]
+        );
+
+        if (existingProblemResult.rows.length === 0) {
+          throw new Error(`Unable to create or find problem: ${question.title}`);
+        }
+
+        problemId = existingProblemResult.rows[0].id;
+      }
+
       const pointMap = { easy: 10, medium: 20, hard: 30 };
-      await query(
+      await client.query(
         `INSERT INTO competition_problems (competition_id, problem_id, order_index, points)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (competition_id, problem_id)
+         DO UPDATE SET
+           order_index = EXCLUDED.order_index,
+           points = EXCLUDED.points`,
         [
           competitionId,
-          problemResult.rows[0].id,
+          problemId,
           question.order_index,
           pointMap[(question.difficulty || 'medium').toLowerCase()] || 20,
         ]
       );
     }
 
-    await query(
+    await client.query(
       `UPDATE competition_requests
        SET status = 'approved',
            approved_at = CURRENT_TIMESTAMP,
@@ -587,12 +632,18 @@ const approveCompetitionRequest = async (req, res) => {
       [competitionId, request.id]
     );
 
-    await sendCompetitionDecisionEmail({
-      creatorEmail: request.creator_email,
-      creatorName: request.creator_name,
-      competitionName: request.competition_name,
-      approved: true,
-    });
+    await client.query('COMMIT');
+
+    try {
+      await sendCompetitionDecisionEmail({
+        creatorEmail: request.creator_email,
+        creatorName: request.creator_name,
+        competitionName: request.competition_name,
+        approved: true,
+      });
+    } catch (emailError) {
+      console.error('Competition approval confirmation email error:', emailError.message);
+    }
 
     return res.send(`
       <html>
@@ -604,7 +655,23 @@ const approveCompetitionRequest = async (req, res) => {
     `);
   } catch (error) {
     console.error('Approve competition request error:', error.message);
-    return res.status(500).send('Failed to approve competition request.');
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Approve competition rollback error:', rollbackError.message);
+      }
+    }
+
+    return res.status(500).send(
+      process.env.NODE_ENV === 'development'
+        ? `Failed to approve competition request. ${error.message}`
+        : 'Failed to approve competition request.'
+    );
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 
