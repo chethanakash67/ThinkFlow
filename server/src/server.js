@@ -6,6 +6,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth.routes'); // ✓ Using OTP-based routes
 const problemRoutes = require('../routes/problemRoutes');
 const submissionRoutes = require('../routes/submissionRoutes');
+const competitionRoutes = require('../routes/competitionRoutes');
 const { init: initDB, pool, runMigrations } = require('./config/db');
 
 const app = express();
@@ -38,11 +39,13 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/problems', problemRoutes);
 app.use('/api/submissions', submissionRoutes);
+app.use('/api/competitions', competitionRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

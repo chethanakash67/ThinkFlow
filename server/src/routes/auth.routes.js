@@ -84,6 +84,29 @@ const googleSigninValidation = [
     .withMessage('Google ID token is required'),
 ];
 
+const updateProfileValidation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 255 })
+    .withMessage('Name must be between 2 and 255 characters'),
+  body('bio')
+    .optional({ nullable: true })
+    .isLength({ max: 500 })
+    .withMessage('Bio must be 500 characters or fewer'),
+  body('country')
+    .optional({ nullable: true })
+    .isLength({ max: 120 })
+    .withMessage('Country must be 120 characters or fewer'),
+  body('githubUrl')
+    .optional({ nullable: true, checkFalsy: true })
+    .isURL({ protocols: ['http', 'https'], require_protocol: true })
+    .withMessage('GitHub URL must be a valid http(s) URL'),
+  body('preferredLanguage')
+    .optional({ nullable: true })
+    .isLength({ max: 50 })
+    .withMessage('Preferred language must be 50 characters or fewer'),
+];
+
 // Routes
 router.post('/signup', signupValidation, authController.signup);
 router.post('/signin', signinValidation, authController.signin);
@@ -91,6 +114,8 @@ router.post('/google-signin', googleSigninValidation, authController.googleSigni
 router.post('/verify-otp', verifyOTPValidation, authController.verifyOTP);
 router.post('/resend-otp', resendOTPValidation, authController.resendOTP);
 router.get('/me', authenticateToken, authController.getMe);
+router.get('/profile', authenticateToken, authController.getProfile);
+router.put('/profile', authenticateToken, updateProfileValidation, authController.updateProfile);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/verify-reset-otp', authController.verifyResetOtp);
 router.post('/reset-password', resetPasswordValidation, authController.resetPassword);

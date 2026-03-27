@@ -1,33 +1,36 @@
 'use client';
 
 import './dashboard.css';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  FaBullseye,
+  FaCheckCircle,
+  FaFileAlt,
+  FaInbox,
+} from 'react-icons/fa';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/auth.context';
 import api from '@/lib/api';
-import { FaFileAlt, FaCheckCircle, FaBullseye, FaInbox } from 'react-icons/fa';
-import Image from 'next/image';
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { user: authUser, logout } = useAuth();
-  const [user, setUser] = useState<any>(null);
+  const { user: authUser } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Use user from auth context first, fall back to API call
-        if (authUser) {
-          setUser(authUser);
-        }
+        const [dashboardResponse, profileResponse] = await Promise.all([
+          api.get('/submissions/dashboard'),
+          api.get('/auth/profile'),
+        ]);
 
-        const statsResponse = await api.get('/submissions/dashboard');
-        setStats(statsResponse.data.stats);
-        setRecentSubmissions(statsResponse.data.recentSubmissions || []);
+        setStats(dashboardResponse.data.stats);
+        setRecentSubmissions(dashboardResponse.data.recentSubmissions || []);
+        setProfile(profileResponse.data.profile || null);
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
       } finally {
@@ -36,125 +39,105 @@ export default function DashboardPage() {
     };
 
     fetchData();
-  }, [authUser]);
+  }, []);
 
-  const handleLogout = () => {
-    logout();
-  };
+  const displayName = useMemo(
+    () => (profile?.name || authUser?.name || 'User').toUpperCase(),
+    [authUser?.name, profile?.name]
+  );
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
     });
-  };
 
   return (
     <ProtectedRoute>
-      <div className="dashboard-container">
-        <header className="dashboard-header">
-          <div className="header-content">
-            <a href="/" className="brand-link">
-              <div className="brand-icon">
-                <Image src="/assets/logo.jpeg" alt="ThinkFlow Logo" width={40} height={40} />
-              </div>
-              <span className="brand-text">ThinkFlow</span>
-            </a>
-            <div className="header-actions">
-              <a href="/problems" className="nav-link">Problems</a>
-              <span className="user-email">{user?.email}</span>
-              <button onClick={handleLogout} className="logout-button">
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <main className="dashboard-main">
+      <div className="app-page dashboard-shell">
+        <main className="app-container dashboard-layout">
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-              Loading...
-            </div>
+            <div className="dashboard-loading">Loading your dashboard...</div>
           ) : (
             <>
-              <div className="welcome-section">
-                <h1 className="welcome-title">Welcome back, {user?.name || 'User'}!</h1>
-                <p className="welcome-subtitle">Continue your learning journey</p>
-              </div>
+              <section className="dashboard-welcome">
+                <h1>Welcome back, {displayName}!</h1>
+                <p>Continue your learning journey</p>
+              </section>
 
-              <div className="stats-grid">
-                <div className="stat-card">
-                  <div className="stat-header">
-                    <span className="stat-label">Total Submissions</span>
-                    <div className="stat-icon stat-icon-1"><FaFileAlt /></div>
+              <section className="dashboard-stats">
+                <article className="dashboard-stat-card">
+                  <div className="dashboard-stat-top">
+                    <span>Total Submissions</span>
+                    <div className="dashboard-stat-icon">
+                      <FaFileAlt />
+                    </div>
                   </div>
-                  <div className="stat-value">{stats?.total_submissions || 0}</div>
-                </div>
+                  <strong>{stats?.total_submissions || 0}</strong>
+                </article>
 
-                <div className="stat-card">
-                  <div className="stat-header">
-                    <span className="stat-label">Correct Solutions</span>
-                    <div className="stat-icon stat-icon-2"><FaCheckCircle /></div>
+                <article className="dashboard-stat-card">
+                  <div className="dashboard-stat-top">
+                    <span>Correct Solutions</span>
+                    <div className="dashboard-stat-icon">
+                      <FaCheckCircle />
+                    </div>
                   </div>
-                  <div className="stat-value">{stats?.correct_count || 0}</div>
-                </div>
+                  <strong>{stats?.correct_count || 0}</strong>
+                </article>
 
-                <div className="stat-card">
-                  <div className="stat-header">
-                    <span className="stat-label">Problems Attempted</span>
-                    <div className="stat-icon stat-icon-3"><FaBullseye /></div>
+                <article className="dashboard-stat-card">
+                  <div className="dashboard-stat-top">
+                    <span>Problems Attempted</span>
+                    <div className="dashboard-stat-icon">
+                      <FaBullseye />
+                    </div>
                   </div>
-                  <div className="stat-value">{stats?.problems_attempted || 0}</div>
-                </div>
-              </div>
+                  <strong>{stats?.problems_attempted || 0}</strong>
+                </article>
+              </section>
 
-              <div className="quick-actions">
-                <h2 className="section-title">Quick Actions</h2>
-                <div className="actions-grid">
-                  <a href="/problems" className="action-button">
+              <section className="dashboard-section">
+                <h2>Quick Actions</h2>
+                <div className="dashboard-actions">
+                  <Link href="/problems" className="dashboard-primary-action">
                     Browse Problems
-                  </a>
-                  <button onClick={() => router.push('/problems')} className="action-button action-button-secondary">
+                  </Link>
+                  <Link href="/problems" className="dashboard-secondary-action">
                     Continue Learning
-                  </button>
+                  </Link>
                 </div>
-              </div>
+              </section>
 
-              <div className="recent-submissions">
-                <h2 className="section-title">Recent Submissions</h2>
-                {recentSubmissions.length === 0 ? (
-                  <div className="empty-state">
-                    <div className="empty-state-icon"><FaInbox /></div>
-                    <p className="empty-state-message">No submissions yet. Start solving problems!</p>
-                    <a href="/problems" className="empty-state-button">
-                      Browse Problems
-                    </a>
-                  </div>
-                ) : (
-                  <div className="submissions-list">
-                    {recentSubmissions.map((submission: any, index: number) => (
-                      <div key={submission.id || index} className="submission-item">
-                        <div className="submission-details">
-                          <div className="submission-problem">
-                            Problem #{submission.problem_id}
+              <section className="dashboard-section">
+                <h2>Recent Submissions</h2>
+                <div className="dashboard-submissions-card">
+                  {recentSubmissions.length > 0 ? (
+                    <div className="dashboard-submission-list">
+                      {recentSubmissions.slice(0, 5).map((submission: any) => (
+                        <div key={submission.id} className="dashboard-submission-item">
+                          <div>
+                            <strong>{submission.title || `Problem #${submission.problem_id}`}</strong>
+                            <p>{formatDate(submission.created_at)}</p>
                           </div>
-                          <div className="submission-date">
-                            {formatDate(submission.submitted_at)}
-                          </div>
+                          <span className={`dashboard-submission-badge ${submission.status === 'correct' ? 'success' : 'error'}`}>
+                            {submission.status}
+                          </span>
                         </div>
-                        <span className={`submission-status ${
-                          submission.is_correct ? 'status-passed' : 'status-failed'
-                        }`}>
-                          {submission.is_correct ? 'Passed' : 'Failed'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="dashboard-empty-state">
+                      <FaInbox />
+                      <p>No submissions yet. Start solving problems!</p>
+                      <Link href="/problems" className="dashboard-empty-button">
+                        Browse Problems
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </section>
             </>
           )}
         </main>

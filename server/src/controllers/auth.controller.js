@@ -8,6 +8,7 @@ const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
+const { getUserPointsSummary, getUserRanks } = require('../../services/gamificationService');
 
 
 const { sendOTPEmail } = require('../services/emailService');
@@ -517,7 +518,9 @@ const googleSignin = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const result = await query(
-      'SELECT id, name, email, role, email_verified, created_at FROM users WHERE id = $1',
+      `SELECT id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at
+       FROM users
+       WHERE id = $1`,
       [req.user.id]
     );
 
@@ -535,6 +538,10 @@ const getMe = async (req, res) => {
         name: result.rows[0].name,
         email: result.rows[0].email,
         role: result.rows[0].role,
+        bio: result.rows[0].bio,
+        country: result.rows[0].country,
+        githubUrl: result.rows[0].github_url,
+        preferredLanguage: result.rows[0].preferred_language,
         emailVerified: result.rows[0].email_verified,
         createdAt: result.rows[0].created_at,
       },
@@ -544,6 +551,179 @@ const getMe = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get user information'
+    });
+  }
+};
+
+const getProfile = async (req, res) => {
+  try {
+    const userResult = await query(
+      `SELECT id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at
+       FROM users
+       WHERE id = $1`,
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    const competitionResult = await query(
+      `SELECT COUNT(*) AS joined_competitions
+       FROM competition_participants
+       WHERE user_id = $1`,
+      [req.user.id]
+    );
+
+    const problemResult = await query(
+      `SELECT COUNT(DISTINCT problem_id) AS solved_problems
+       FROM logic_submissions
+       WHERE user_id = $1 AND status = 'correct'`,
+      [req.user.id]
+    );
+
+    const languageResult = await query(
+      `SELECT language, COUNT(*)::int AS usage_count
+       FROM code_submissions
+       WHERE user_id = $1
+       GROUP BY language
+       ORDER BY usage_count DESC, language ASC
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    const successRateResult = await query(
+      `SELECT
+         COUNT(*)::int AS total_submissions,
+         COALESCE(SUM(CASE WHEN status = 'correct' THEN 1 ELSE 0 END), 0)::int AS correct_submissions
+       FROM logic_submissions
+       WHERE user_id = $1`,
+      [req.user.id]
+    );
+
+    const totalSubmissions = successRateResult.rows[0]?.total_submissions || 0;
+    const correctSubmissions = successRateResult.rows[0]?.correct_submissions || 0;
+    const successRate = totalSubmissions > 0 ? Math.round((correctSubmissions / totalSubmissions) * 100) : 0;
+
+    const [gamification, ranks] = await Promise.all([
+      getUserPointsSummary(req.user.id),
+      getUserRanks(req.user.id),
+    ]);
+
+    const user = userResult.rows[0];
+
+    return res.json({
+      success: true,
+      profile: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        bio: user.bio || '',
+        country: user.country || '',
+        githubUrl: user.github_url || '',
+        preferredLanguage: user.preferred_language || languageResult.rows[0]?.language || '',
+        emailVerified: user.email_verified,
+        createdAt: user.created_at,
+      },
+      metrics: {
+        joinedCompetitions: parseInt(competitionResult.rows[0].joined_competitions, 10) || 0,
+        solvedProblems: parseInt(problemResult.rows[0].solved_problems, 10) || 0,
+        topLanguage: languageResult.rows[0]?.language || user.preferred_language || null,
+      },
+      stats: {
+        problemsSolved: gamification.solvedCount,
+        competitionsJoined: parseInt(competitionResult.rows[0].joined_competitions, 10) || 0,
+        successRate,
+        totalPoints: gamification.totalPoints,
+        weeklyPoints: gamification.weeklyPoints,
+      },
+      rankings: ranks,
+      badges: gamification.badges,
+    });
+  } catch (error) {
+    console.error('Get profile error:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch profile',
+    });
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const {
+      name,
+      bio = '',
+      country = '',
+      githubUrl = '',
+      preferredLanguage = '',
+    } = req.body;
+
+    const trimmedName = (name || '').trim();
+    const trimmedBio = bio.trim().slice(0, 500);
+    const trimmedCountry = country.trim().slice(0, 120);
+    const trimmedGithubUrl = githubUrl.trim().slice(0, 255);
+    const trimmedPreferredLanguage = preferredLanguage.trim().slice(0, 50);
+
+    if (trimmedName.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name must be at least 2 characters long',
+      });
+    }
+
+    if (trimmedGithubUrl && !/^https?:\/\//i.test(trimmedGithubUrl)) {
+      return res.status(400).json({
+        success: false,
+        error: 'GitHub URL must start with http:// or https://',
+      });
+    }
+
+    const result = await query(
+      `UPDATE users
+       SET name = $1,
+           bio = $2,
+           country = $3,
+           github_url = $4,
+           preferred_language = $5,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at`,
+      [
+        trimmedName,
+        trimmedBio || null,
+        trimmedCountry || null,
+        trimmedGithubUrl || null,
+        trimmedPreferredLanguage || null,
+        req.user.id,
+      ]
+    );
+
+    return res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      profile: {
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        email: result.rows[0].email,
+        role: result.rows[0].role,
+        bio: result.rows[0].bio || '',
+        country: result.rows[0].country || '',
+        githubUrl: result.rows[0].github_url || '',
+        preferredLanguage: result.rows[0].preferred_language || '',
+        emailVerified: result.rows[0].email_verified,
+        createdAt: result.rows[0].created_at,
+      },
+    });
+  } catch (error) {
+    console.error('Update profile error:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update profile',
     });
   }
 };
@@ -756,6 +936,8 @@ module.exports = {
   signin,
   googleSignin,
   getMe,
+  getProfile,
+  updateProfile,
   verifyOTP,
   resendOTP,
   forgotPassword,

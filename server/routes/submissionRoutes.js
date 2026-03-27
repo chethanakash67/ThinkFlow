@@ -13,5 +13,6 @@ router.post('/code', submissionController.submitCode);
 router.post('/code/custom-test', submissionController.runCustomCodeTest);
 router.get('/code', submissionController.getCodeSubmissions);
 router.get('/dashboard', submissionController.getDashboardStats);
+router.get('/leaderboard', submissionController.getLeaderboardOverview);
 
 module.exports = router;

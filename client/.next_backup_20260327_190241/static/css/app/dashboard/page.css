@@ -1,0 +1,232 @@
+/*!***************************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ../node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[11].oneOf[12].use[2]!../node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[11].oneOf[12].use[3]!./app/dashboard/dashboard.css ***!
+  \***************************************************************************************************************************************************************************************************************************************************************************/
+.dashboard-shell {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fbff 0%, #f4f7fc 100%);
+}
+
+.dashboard-layout {
+  padding-top: 2.75rem;
+  padding-bottom: 3rem;
+}
+
+.dashboard-layout,
+.dashboard-stats,
+.dashboard-actions,
+.dashboard-submission-list {
+  display: grid;
+  grid-gap: 1.8rem;
+  gap: 1.8rem;
+}
+
+.dashboard-loading {
+  min-height: 55vh;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  font-size: 1.05rem;
+}
+
+.dashboard-welcome h1,
+.dashboard-section h2 {
+  color: #17223b;
+}
+
+.dashboard-welcome h1 {
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+  line-height: 1.06;
+  margin-bottom: 0.7rem;
+  letter-spacing: -0.03em;
+}
+
+.dashboard-welcome p {
+  color: #6b7a96;
+  font-size: 1.2rem;
+}
+
+.dashboard-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-stat-card,
+.dashboard-submissions-card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d9e3f2;
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(20, 34, 61, 0.05);
+}
+
+.dashboard-stat-card {
+  padding: 2rem;
+}
+
+.dashboard-stat-top,
+.dashboard-submission-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dashboard-stat-top span {
+  color: #6b7a96;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard-stat-icon {
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  background: #e8ecff;
+  color: #4f46e5;
+  font-size: 1.75rem;
+}
+
+.dashboard-stat-card strong {
+  display: block;
+  margin-top: 1.6rem;
+  font-size: 3.8rem;
+  line-height: 1;
+  color: #4f46e5;
+}
+
+.dashboard-section h2 {
+  font-size: 2.15rem;
+  margin-bottom: 1rem;
+}
+
+.dashboard-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-primary-action,
+.dashboard-secondary-action,
+.dashboard-empty-button {
+  border-radius: 20px;
+  text-align: center;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.dashboard-primary-action,
+.dashboard-secondary-action {
+  padding: 1.55rem 1.25rem;
+  font-size: 1.15rem;
+}
+
+.dashboard-primary-action {
+  background: linear-gradient(135deg, #5b57ef, #4f46e5);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(79, 70, 229, 0.24);
+}
+
+.dashboard-secondary-action {
+  background: #ffffff;
+  border: 1px solid #d9e3f2;
+  color: #4f46e5;
+  box-shadow: 0 12px 24px rgba(20, 34, 61, 0.04);
+}
+
+.dashboard-submissions-card {
+  min-height: 380px;
+  padding: 1.5rem;
+}
+
+.dashboard-submission-list {
+  gap: 1rem;
+}
+
+.dashboard-submission-item {
+  padding: 1rem 1.15rem;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: #fbfdff;
+}
+
+.dashboard-submission-item strong {
+  display: block;
+  color: #17223b;
+  margin-bottom: 0.3rem;
+}
+
+.dashboard-submission-item p {
+  color: #6b7a96;
+}
+
+.dashboard-submission-badge {
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.dashboard-submission-badge.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.dashboard-submission-badge.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.dashboard-empty-state {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  grid-gap: 1rem;
+  gap: 1rem;
+  text-align: center;
+  color: #6b7a96;
+}
+
+.dashboard-empty-state svg {
+  font-size: 3rem;
+  color: #a8b4c8;
+}
+
+.dashboard-empty-state p {
+  font-size: 1rem;
+}
+
+.dashboard-empty-button {
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #5b57ef, #4f46e5);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(79, 70, 229, 0.2);
+}
+
+@media (max-width: 1080px) {
+  .dashboard-stats,
+  .dashboard-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-layout {
+    padding-top: 2rem;
+  }
+
+  .dashboard-stat-card,
+  .dashboard-submissions-card {
+    padding: 1.25rem;
+  }
+
+  .dashboard-stat-card strong {
+    font-size: 3rem;
+  }
+
+  .dashboard-section h2 {
+    font-size: 1.85rem;
+  }
+}
+

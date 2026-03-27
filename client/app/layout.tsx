@@ -1,10 +1,7 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import { AuthProvider } from '@/context/auth.context'
 import GlobalNav from '@/components/GlobalNav'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'ThinkFlow - AI-Assisted Coding Practice Platform',
@@ -17,11 +14,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="icon" href="/favicon.png" type="image/png" />
       </head>
-      <body className={inter.className}>
+      <body>
         <AuthProvider>
           <GlobalNav />
           <main className="min-h-screen">

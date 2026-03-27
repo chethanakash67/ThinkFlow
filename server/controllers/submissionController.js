@@ -1,6 +1,7 @@
 const { query } = require('../src/config/db');
 const { evaluateLogic, generateExecutionSteps } = require('../services/logicEvaluationService');
 const { executeCode } = require('../services/codeExecutionService');
+const { awardSolvePoints, getLeaderboard, getUserPointsSummary } = require('../services/gamificationService');
 
 // Submit logic for evaluation
 const submitLogic = async (req, res) => {
@@ -225,6 +226,16 @@ const submitCode = async (req, res) => {
       ]
     );
 
+    let pointsAwarded = 0;
+    if (executionResult.status === 'correct') {
+      const awardResult = await awardSolvePoints({
+        userId,
+        problemId,
+        difficulty: problem.difficulty,
+      });
+      pointsAwarded = awardResult.points;
+    }
+
     res.status(201).json({
       submission: {
         id: result.rows[0].id,
@@ -232,6 +243,7 @@ const submitCode = async (req, res) => {
         passedCount: executionResult.passedCount,
         totalCount: executionResult.totalCount,
         score: executionResult.score,
+        pointsAwarded,
         results: executionResult.results,
         message: executionResult.status === 'correct' 
           ? 'All test cases passed!' 
@@ -374,13 +386,30 @@ const getDashboardStats = async (req, res) => {
       [userId]
     );
 
+    const gamification = await getUserPointsSummary(userId);
+
     res.json({
       stats: submissionStats.rows[0],
       recentSubmissions: recentSubmissions.rows,
+      gamification,
     });
   } catch (error) {
     console.error('Get dashboard stats error:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+  }
+};
+
+const getLeaderboardOverview = async (req, res) => {
+  try {
+    const [global, weekly] = await Promise.all([
+      getLeaderboard('global', 20),
+      getLeaderboard('weekly', 20),
+    ]);
+
+    res.json({ global, weekly });
+  } catch (error) {
+    console.error('Get leaderboard overview error:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard overview' });
   }
 };
 
@@ -392,4 +421,5 @@ module.exports = {
   runCustomCodeTest,
   getCodeSubmissions,
   getDashboardStats,
+  getLeaderboardOverview,
 };

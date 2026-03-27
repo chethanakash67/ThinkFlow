@@ -336,6 +336,10 @@ const init = async () => {
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         role VARCHAR(50) DEFAULT 'user',
+        bio TEXT,
+        country VARCHAR(120),
+        github_url VARCHAR(255),
+        preferred_language VARCHAR(50),
         email_verified BOOLEAN DEFAULT FALSE,
         otp_code VARCHAR(6),
         otp_expires TIMESTAMP,
@@ -430,6 +434,110 @@ const init = async () => {
     `);
     console.log('  ✓ Table: pending_registrations');
 
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competitions (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        difficulty VARCHAR(50) DEFAULT 'mixed',
+        start_at TIMESTAMP NOT NULL,
+        end_at TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'upcoming',
+        max_participants INTEGER DEFAULT 500,
+        entry_fee INTEGER DEFAULT 0,
+        reward_pool INTEGER DEFAULT 0,
+        is_featured BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: competitions');
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competition_problems (
+        id SERIAL PRIMARY KEY,
+        competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+        order_index INTEGER DEFAULT 0,
+        points INTEGER DEFAULT 100,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (competition_id, problem_id)
+      )
+    `);
+    console.log('  ✓ Table: competition_problems');
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competition_participants (
+        id SERIAL PRIMARY KEY,
+        competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'registered',
+        UNIQUE (competition_id, user_id)
+      )
+    `);
+    console.log('  ✓ Table: competition_participants');
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competition_requests (
+        id SERIAL PRIMARY KEY,
+        creator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        creator_name VARCHAR(255) NOT NULL,
+        creator_email VARCHAR(255) NOT NULL,
+        creator_phone VARCHAR(50) NOT NULL,
+        organization_name VARCHAR(255),
+        competition_name VARCHAR(255) NOT NULL,
+        competition_date DATE NOT NULL,
+        start_time VARCHAR(20) NOT NULL,
+        end_time VARCHAR(20) NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        question_count INTEGER NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending_approval',
+        approval_token VARCHAR(255) UNIQUE NOT NULL,
+        rejection_token VARCHAR(255) UNIQUE NOT NULL,
+        rejection_reason TEXT,
+        approved_competition_id INTEGER REFERENCES competitions(id) ON DELETE SET NULL,
+        approved_at TIMESTAMP,
+        rejected_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: competition_requests');
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competition_request_questions (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES competition_requests(id) ON DELETE CASCADE,
+        order_index INTEGER NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        sample_input_1 TEXT,
+        sample_output_1 TEXT,
+        sample_input_2 TEXT,
+        sample_output_2 TEXT,
+        constraints TEXT,
+        difficulty VARCHAR(50) DEFAULT 'medium',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ Table: competition_request_questions');
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS user_points (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        points INTEGER NOT NULL,
+        source_type VARCHAR(50) NOT NULL,
+        source_id INTEGER NOT NULL,
+        meta JSONB,
+        awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, source_type, source_id)
+      )
+    `);
+    console.log('  ✓ Table: user_points');
+
     // Create indexes
     console.log('📝 Creating indexes...');
     const indexes = [
@@ -439,7 +547,15 @@ const init = async () => {
       'CREATE INDEX IF NOT EXISTS idx_logic_submissions_problem ON logic_submissions(problem_id)',
       'CREATE INDEX IF NOT EXISTS idx_code_submissions_user ON code_submissions(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_code_submissions_problem ON code_submissions(problem_id)',
-      'CREATE INDEX IF NOT EXISTS idx_execution_steps_submission ON execution_steps(logic_submission_id)'
+      'CREATE INDEX IF NOT EXISTS idx_execution_steps_submission ON execution_steps(logic_submission_id)',
+      'CREATE INDEX IF NOT EXISTS idx_competitions_status ON competitions(status)',
+      'CREATE INDEX IF NOT EXISTS idx_competition_problems_competition ON competition_problems(competition_id)',
+      'CREATE INDEX IF NOT EXISTS idx_competition_participants_competition ON competition_participants(competition_id)',
+      'CREATE INDEX IF NOT EXISTS idx_competition_participants_user ON competition_participants(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_competition_requests_creator ON competition_requests(creator_user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_competition_request_questions_request ON competition_request_questions(request_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_user ON user_points(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_awarded_at ON user_points(awarded_at)'
     ];
 
     for (const indexSql of indexes) {
@@ -457,6 +573,13 @@ const init = async () => {
       console.log('📝 Seeding sample problems...');
       await seedProblems(dbPool);
       console.log('  ✓ Sample problems added');
+    }
+
+    const competitionCount = await dbPool.query('SELECT COUNT(*) FROM competitions');
+    if (parseInt(competitionCount.rows[0].count) === 0) {
+      console.log('📝 Seeding competitions...');
+      await seedCompetitions(dbPool);
+      console.log('  ✓ Competitions added');
     }
 
     console.log('\n✅ Database schema initialized successfully');
@@ -1020,6 +1143,137 @@ const insertInitialData = async () => {
   }
 };
 
+const seedCompetitions = async (dbPool) => {
+  const problemsResult = await dbPool.query(
+    `SELECT id, difficulty
+     FROM problems
+     ORDER BY id ASC`
+  );
+
+  if (problemsResult.rows.length < 3) {
+    return 0;
+  }
+
+  const problemsByDifficulty = {
+    easy: problemsResult.rows.filter((problem) => problem.difficulty === 'easy'),
+    medium: problemsResult.rows.filter((problem) => problem.difficulty === 'medium'),
+    hard: problemsResult.rows.filter((problem) => problem.difficulty === 'hard'),
+  };
+
+  const mixedProblems = [
+    problemsByDifficulty.easy[0],
+    problemsByDifficulty.medium[0],
+    problemsByDifficulty.medium[1] || problemsByDifficulty.medium[0],
+  ].filter(Boolean);
+
+  const sprintProblems = [
+    problemsByDifficulty.easy[1] || problemsByDifficulty.easy[0],
+    problemsByDifficulty.easy[2] || problemsByDifficulty.easy[0],
+    problemsByDifficulty.medium[2] || problemsByDifficulty.medium[0],
+  ].filter(Boolean);
+
+  const championshipProblems = [
+    problemsByDifficulty.medium[3] || problemsByDifficulty.medium[0],
+    problemsByDifficulty.hard[0] || problemsByDifficulty.medium[0],
+    problemsByDifficulty.hard[1] || problemsByDifficulty.medium[1] || problemsByDifficulty.medium[0],
+  ].filter(Boolean);
+
+  const competitions = [
+    {
+      title: 'April Algorithm Arena',
+      slug: 'april-algorithm-arena',
+      description: 'A balanced three-problem contest focused on arrays, greedy thinking, and graph fundamentals.',
+      difficulty: 'mixed',
+      startAtOffsetDays: -1,
+      endAtOffsetDays: 6,
+      status: 'open',
+      maxParticipants: 500,
+      rewardPool: 1500,
+      isFeatured: true,
+      problems: mixedProblems,
+    },
+    {
+      title: 'Weekend Sprint Cup',
+      slug: 'weekend-sprint-cup',
+      description: 'A fast-paced warm-up competition built for consistency and quick correct submissions.',
+      difficulty: 'easy',
+      startAtOffsetDays: 2,
+      endAtOffsetDays: 4,
+      status: 'upcoming',
+      maxParticipants: 300,
+      rewardPool: 500,
+      isFeatured: false,
+      problems: sprintProblems,
+    },
+    {
+      title: 'ThinkFlow Championship Qualifier',
+      slug: 'thinkflow-championship-qualifier',
+      description: 'A sharper round with heavier scoring, meant for learners ready to stretch into harder problems.',
+      difficulty: 'hard',
+      startAtOffsetDays: 7,
+      endAtOffsetDays: 10,
+      status: 'upcoming',
+      maxParticipants: 200,
+      rewardPool: 2500,
+      isFeatured: true,
+      problems: championshipProblems,
+    },
+  ];
+
+  let insertedCount = 0;
+
+  for (const competition of competitions) {
+    const startAt = new Date(Date.now() + competition.startAtOffsetDays * 24 * 60 * 60 * 1000);
+    const endAt = new Date(Date.now() + competition.endAtOffsetDays * 24 * 60 * 60 * 1000);
+
+    const competitionResult = await dbPool.query(
+      `INSERT INTO competitions (
+        title, slug, description, difficulty, start_at, end_at, status, max_participants, reward_pool, is_featured
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (slug) DO UPDATE SET
+        description = EXCLUDED.description,
+        difficulty = EXCLUDED.difficulty,
+        start_at = EXCLUDED.start_at,
+        end_at = EXCLUDED.end_at,
+        status = EXCLUDED.status,
+        max_participants = EXCLUDED.max_participants,
+        reward_pool = EXCLUDED.reward_pool,
+        is_featured = EXCLUDED.is_featured,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING id`,
+      [
+        competition.title,
+        competition.slug,
+        competition.description,
+        competition.difficulty,
+        startAt,
+        endAt,
+        competition.status,
+        competition.maxParticipants,
+        competition.rewardPool,
+        competition.isFeatured,
+      ]
+    );
+
+    const competitionId = competitionResult.rows[0].id;
+    await dbPool.query('DELETE FROM competition_problems WHERE competition_id = $1', [competitionId]);
+
+    for (const [index, problem] of competition.problems.entries()) {
+      await dbPool.query(
+        `INSERT INTO competition_problems (competition_id, problem_id, order_index, points)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (competition_id, problem_id) DO NOTHING`,
+        [competitionId, problem.id, index + 1, 100 + index * 25]
+      );
+    }
+
+    insertedCount += 1;
+  }
+
+  return insertedCount;
+};
+
 /**
  * Run migrations to add missing columns to existing tables
  * This is called after schema init to ensure columns exist
@@ -1050,6 +1304,26 @@ const runMigrations = async () => {
       run: `ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE`
     },
     {
+      name: 'Add bio to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'bio'`,
+      run: `ALTER TABLE users ADD COLUMN bio TEXT`
+    },
+    {
+      name: 'Add country to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'country'`,
+      run: `ALTER TABLE users ADD COLUMN country VARCHAR(120)`
+    },
+    {
+      name: 'Add github_url to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'github_url'`,
+      run: `ALTER TABLE users ADD COLUMN github_url VARCHAR(255)`
+    },
+    {
+      name: 'Add preferred_language to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'preferred_language'`,
+      run: `ALTER TABLE users ADD COLUMN preferred_language VARCHAR(50)`
+    },
+    {
       name: 'Add test_results to code_submissions',
       check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'code_submissions' AND column_name = 'test_results'`,
       run: `ALTER TABLE code_submissions ADD COLUMN test_results JSONB`
@@ -1058,6 +1332,110 @@ const runMigrations = async () => {
       name: 'Add execution_time to code_submissions',
       check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'code_submissions' AND column_name = 'execution_time'`,
       run: `ALTER TABLE code_submissions ADD COLUMN execution_time INTEGER DEFAULT 0`
+    },
+    {
+      name: 'Create competitions table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'competitions'`,
+      run: `CREATE TABLE competitions (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        difficulty VARCHAR(50) DEFAULT 'mixed',
+        start_at TIMESTAMP NOT NULL,
+        end_at TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'upcoming',
+        max_participants INTEGER DEFAULT 500,
+        entry_fee INTEGER DEFAULT 0,
+        reward_pool INTEGER DEFAULT 0,
+        is_featured BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`
+    },
+    {
+      name: 'Create competition_problems table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'competition_problems'`,
+      run: `CREATE TABLE competition_problems (
+        id SERIAL PRIMARY KEY,
+        competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+        order_index INTEGER DEFAULT 0,
+        points INTEGER DEFAULT 100,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (competition_id, problem_id)
+      )`
+    },
+    {
+      name: 'Create competition_participants table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'competition_participants'`,
+      run: `CREATE TABLE competition_participants (
+        id SERIAL PRIMARY KEY,
+        competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'registered',
+        UNIQUE (competition_id, user_id)
+      )`
+    },
+    {
+      name: 'Create competition_requests table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'competition_requests'`,
+      run: `CREATE TABLE competition_requests (
+        id SERIAL PRIMARY KEY,
+        creator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        creator_name VARCHAR(255) NOT NULL,
+        creator_email VARCHAR(255) NOT NULL,
+        creator_phone VARCHAR(50) NOT NULL,
+        organization_name VARCHAR(255),
+        competition_name VARCHAR(255) NOT NULL,
+        competition_date DATE NOT NULL,
+        start_time VARCHAR(20) NOT NULL,
+        end_time VARCHAR(20) NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        question_count INTEGER NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending_approval',
+        approval_token VARCHAR(255) UNIQUE NOT NULL,
+        rejection_token VARCHAR(255) UNIQUE NOT NULL,
+        rejection_reason TEXT,
+        approved_competition_id INTEGER REFERENCES competitions(id) ON DELETE SET NULL,
+        approved_at TIMESTAMP,
+        rejected_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`
+    },
+    {
+      name: 'Create competition_request_questions table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'competition_request_questions'`,
+      run: `CREATE TABLE competition_request_questions (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES competition_requests(id) ON DELETE CASCADE,
+        order_index INTEGER NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        sample_input_1 TEXT,
+        sample_output_1 TEXT,
+        sample_input_2 TEXT,
+        sample_output_2 TEXT,
+        constraints TEXT,
+        difficulty VARCHAR(50) DEFAULT 'medium',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`
+    },
+    {
+      name: 'Create user_points table',
+      check: `SELECT table_name FROM information_schema.tables WHERE table_name = 'user_points'`,
+      run: `CREATE TABLE user_points (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        points INTEGER NOT NULL,
+        source_type VARCHAR(50) NOT NULL,
+        source_id INTEGER NOT NULL,
+        meta JSONB,
+        awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, source_type, source_id)
+      )`
     }
   ];
 
@@ -1073,6 +1451,30 @@ const runMigrations = async () => {
     } catch (error) {
       console.error(`  ❌ ${migration.name}: ${error.message}`);
     }
+  }
+
+  try {
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competitions_status ON competitions(status)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_problems_competition ON competition_problems(competition_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_participants_competition ON competition_participants(competition_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_participants_user ON competition_participants(user_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_requests_creator ON competition_requests(creator_user_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_request_questions_request ON competition_request_questions(request_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_user_points_user ON user_points(user_id)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_user_points_awarded_at ON user_points(awarded_at)');
+    console.log('  ✓ Competition indexes ready');
+  } catch (error) {
+    console.error(`  ❌ Competition indexes: ${error.message}`);
+  }
+
+  try {
+    const competitionCount = await dbPool.query('SELECT COUNT(*) FROM competitions');
+    if (parseInt(competitionCount.rows[0].count, 10) === 0) {
+      await seedCompetitions(dbPool);
+      console.log('  ✓ Competition seed data ready');
+    }
+  } catch (error) {
+    console.error(`  ❌ Competition seed: ${error.message}`);
   }
 
   // Keep only the newest row for each normalized problem title

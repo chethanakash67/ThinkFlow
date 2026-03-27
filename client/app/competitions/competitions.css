@@ -1,0 +1,422 @@
+.competitions-page {
+  background: linear-gradient(180deg, #f8fbff 0%, #f4f7fc 100%);
+}
+
+.competitions-main,
+.competitions-layout,
+.competitions-left-column,
+.competition-card-grid,
+.competitions-hero-stats,
+.competition-detail-chips,
+.detail-list,
+.leaderboard-preview-grid,
+.competition-builder-grid,
+.builder-form-grid,
+.question-builder-list,
+.review-list {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.competitions-main {
+  padding-top: 2.75rem;
+  padding-bottom: 3rem;
+}
+
+.competitions-hero,
+.competition-detail-panel,
+.leaderboard-preview-card,
+.competition-builder-card,
+.competition-overview-card,
+.competition-empty-card,
+.competition-detail-card,
+.question-builder-card,
+.review-card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d9e3f2;
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(20, 34, 61, 0.05);
+}
+
+.competitions-hero {
+  padding: 2.2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.95fr);
+  gap: 1.8rem;
+}
+
+.competitions-hero .app-kicker,
+.competition-section-head .app-kicker,
+.competition-detail-head .app-kicker,
+.competition-builder-head .app-kicker {
+  color: #4f46e5;
+}
+
+.competitions-hero h1 {
+  font-size: clamp(2.4rem, 4vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  color: #17223b;
+  max-width: 9ch;
+  margin: 0.7rem 0 1rem;
+}
+
+.competitions-hero .app-muted {
+  max-width: 58ch;
+  color: #6b7a96;
+  font-size: 1.14rem;
+  line-height: 1.7;
+}
+
+.competitions-hero-stats {
+  align-content: start;
+}
+
+.hero-stat-card {
+  padding: 1.4rem 1.5rem;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #5b57ef, #4f46e5);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(79, 70, 229, 0.18);
+}
+
+.hero-stat-card span {
+  display: block;
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.86;
+}
+
+.hero-stat-card strong {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.competitions-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.88fr);
+  align-items: start;
+}
+
+.competitions-left-column {
+  gap: 1.7rem;
+}
+
+.competition-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.competition-section-head h2,
+.competition-detail-head h2,
+.competition-builder-head h2 {
+  margin-top: 0.35rem;
+  color: #17223b;
+}
+
+.competition-section-head h2 {
+  font-size: 1.25rem;
+}
+
+.competition-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.competition-overview-card {
+  padding: 1.3rem;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.competition-overview-card:hover,
+.competition-overview-card.selected {
+  transform: translateY(-2px);
+  border-color: #bcccf0;
+  box-shadow: 0 20px 40px rgba(20, 34, 61, 0.08);
+}
+
+.competition-overview-top,
+.competition-meta-row,
+.competition-detail-head,
+.detail-card-head,
+.detail-list-item,
+.leaderboard-row,
+.competition-builder-head,
+.builder-steps,
+.question-builder-head,
+.builder-actions {
+  display: flex;
+  align-items: center;
+}
+
+.competition-overview-top,
+.competition-detail-head,
+.detail-card-head,
+.detail-list-item,
+.competition-builder-head,
+.question-builder-head,
+.builder-actions {
+  justify-content: space-between;
+}
+
+.competition-overview-card h3 {
+  margin: 0.95rem 0 0.55rem;
+  color: #17223b;
+  font-size: 1.18rem;
+}
+
+.competition-overview-card p,
+.detail-list-item p,
+.review-card p {
+  color: #6b7a96;
+  line-height: 1.65;
+}
+
+.competition-meta-row {
+  gap: 0.95rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+  color: #6b7a96;
+  font-size: 0.95rem;
+}
+
+.competition-meta-row span,
+.detail-chip,
+.leaderboard-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.competition-pill,
+.joined-pill,
+.builder-step {
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.competition-pill,
+.joined-pill {
+  padding: 0.45rem 0.82rem;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.competition-pill-open,
+.competition-pill-approved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.competition-pill-upcoming,
+.competition-pill-pending_approval {
+  background: #e8ecff;
+  color: #4f46e5;
+}
+
+.competition-pill-completed {
+  background: #eef2f7;
+  color: #64748b;
+}
+
+.competition-pill-rejected {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.joined-pill {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.competition-detail-panel,
+.competition-builder-card {
+  padding: 1.35rem;
+}
+
+.competitions-right-column,
+.leaderboard-preview-grid {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.competition-detail-head h2 {
+  font-size: 1.8rem;
+  margin: 0.35rem 0 0.7rem;
+}
+
+.competition-detail-chips {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-chip {
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  background: #fbfdff;
+  border: 1px solid #e2e8f0;
+  color: #4a5b78;
+  font-size: 0.95rem;
+}
+
+.competition-detail-card,
+.leaderboard-preview-card,
+.question-builder-card,
+.review-card {
+  padding: 1.2rem;
+}
+
+.detail-card-head {
+  margin-bottom: 0.35rem;
+}
+
+.detail-card-head h3 {
+  color: #17223b;
+  font-size: 1.2rem;
+}
+
+.detail-card-head span {
+  color: #6b7a96;
+}
+
+.detail-list {
+  gap: 0.9rem;
+}
+
+.detail-list-item {
+  gap: 1rem;
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: #fbfdff;
+}
+
+.detail-list-item strong,
+.leaderboard-preview-card h3 {
+  color: #17223b;
+}
+
+.leaderboard-row strong {
+  flex: 1;
+}
+
+.leaderboard-rank {
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.competition-empty-card {
+  padding: 1.2rem 1.1rem;
+  color: #6b7a96;
+  line-height: 1.6;
+  min-height: 92px;
+  display: grid;
+  align-items: center;
+}
+
+.competition-builder-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.82fr);
+}
+
+.competition-builder-head {
+  margin-bottom: 0.2rem;
+}
+
+.builder-step {
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d9e3f2;
+  background: #ffffff;
+  color: #6b7a96;
+  cursor: pointer;
+}
+
+.builder-step.active {
+  background: linear-gradient(135deg, #5b57ef, #4f46e5);
+  color: white;
+  border-color: transparent;
+}
+
+.builder-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.builder-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.builder-field span {
+  color: #6b7a96;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.builder-field input,
+.builder-field textarea,
+.question-builder-head select {
+  width: 100%;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid #d9e3f2;
+  background: #fbfdff;
+  color: #17223b;
+}
+
+.builder-field-full {
+  grid-column: 1 / -1;
+}
+
+.question-builder-card {
+  padding: 1.15rem;
+}
+
+.question-builder-head h3 {
+  color: #17223b;
+  font-size: 1.05rem;
+}
+
+.builder-actions {
+  margin-top: 0.35rem;
+}
+
+.review-list {
+  margin-top: 1rem;
+  padding-left: 1.2rem;
+  color: #6b7a96;
+}
+
+.review-list li + li {
+  margin-top: 0.45rem;
+}
+
+@media (max-width: 1120px) {
+  .competitions-hero,
+  .competitions-layout,
+  .competition-builder-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .competitions-main {
+    padding-top: 2rem;
+  }
+
+  .competitions-hero,
+  .competition-detail-panel,
+  .competition-builder-card {
+    padding: 1.25rem;
+  }
+
+  .competition-detail-chips,
+  .builder-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .competitions-hero h1 {
+    max-width: none;
+  }
+}

@@ -140,7 +140,7 @@ function VerifyOTPContent() {
               </div>
               <div className="feature-text">
                 <h3>Check Your Inbox</h3>
-                <p>We've sent a 6-digit verification code to your email</p>
+                <p>We've sent a 6-digit verification code to your email. If it's not in your inbox, check your spam folder.</p>
               </div>
             </div>
             
@@ -202,6 +202,8 @@ function VerifyOTPContent() {
             <p className="verify-otp-subtitle">
               We've sent a 6-digit code to<br />
               <span className="email-highlight">{email}</span>
+              <br />
+              If you don&apos;t see it in your inbox, check spam.
             </p>
           </div>
 
