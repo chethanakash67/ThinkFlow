@@ -167,7 +167,7 @@ const listCompetitions = async (req, res) => {
         AND cr.status = 'approved'
        LEFT JOIN competition_participants cp ON cp.competition_id = c.id
        WHERE c.status IN ('upcoming', 'open', 'completed')
-       GROUP BY c.id
+       GROUP BY c.id, cr.competition_date, cr.start_time, cr.end_time
        ORDER BY
          CASE
            WHEN c.end_at < CURRENT_TIMESTAMP THEN 3
@@ -204,7 +204,7 @@ const getCompetitionById = async (req, res) => {
         AND cr.status = 'approved'
        LEFT JOIN competition_participants cp ON cp.competition_id = c.id
        WHERE c.id = $1
-       GROUP BY c.id`,
+       GROUP BY c.id, cr.competition_date, cr.start_time, cr.end_time`,
       [competitionId, req.user.id]
     );
 
@@ -341,7 +341,7 @@ const getMyCompetitions = async (req, res) => {
           AND cr.status = 'approved'
          LEFT JOIN competition_participants all_participants ON all_participants.competition_id = c.id
          WHERE part.user_id = $1
-         GROUP BY c.id, part.joined_at
+         GROUP BY c.id, cr.competition_date, cr.start_time, cr.end_time, part.joined_at
          ORDER BY c.start_at ASC`,
         [req.user.id]
       ),
@@ -420,7 +420,7 @@ const createCompetitionRequest = async (req, res) => {
          approval_token,
          rejection_token
        )
-       VALUES ($1, $2, NULL, $3, $4, NULL, $5, NULL, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, NULL, $3, $4, NULL, $5, NULL, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
       [
         req.user.id,
