@@ -75,8 +75,33 @@ const buildCompetitionDescription = (questions) => {
   return `Tackle ${questions.length} custom challenge${questions.length > 1 ? 's' : ''} across practical problem-solving scenarios.`;
 };
 
+const normalizeDatePart = (dateValue) => {
+  if (dateValue instanceof Date) {
+    return dateValue.toISOString().slice(0, 10);
+  }
+
+  const parsedDate = new Date(dateValue);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate.toISOString().slice(0, 10);
+  }
+
+  const rawValue = String(dateValue || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    return rawValue;
+  }
+
+  throw new Error(`Invalid competition date: ${dateValue}`);
+};
+
 const buildCompetitionDateTime = (dateValue, timeValue) => {
-  const isoString = `${dateValue}T${timeValue}:00`;
+  const normalizedDate = normalizeDatePart(dateValue);
+  const normalizedTime = String(timeValue || '').trim();
+
+  if (!/^\d{2}:\d{2}$/.test(normalizedTime)) {
+    throw new Error(`Invalid competition time: ${timeValue}`);
+  }
+
+  const isoString = `${normalizedDate}T${normalizedTime}:00`;
   const parsedDate = new Date(isoString);
 
   if (Number.isNaN(parsedDate.getTime())) {
