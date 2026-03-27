@@ -232,14 +232,61 @@ export default function CompetitionsPage() {
     return groups;
   }, [competitions]);
 
-  const formatDate = (value: string) =>
-    new Date(value).toLocaleString('en-US', {
+  const formatDateOnly = (value: string) => {
+    if (!value) return '';
+
+    const normalizedValue = value.includes('T') ? value.slice(0, 10) : value;
+    const match = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return value;
+
+    const [, year, month, day] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+    });
+  };
+
+  const formatTimeOnly = (value: string) => {
+    if (!value) return '';
+
+    const [hours, minutes] = value.split(':');
+    if (hours === undefined || minutes === undefined) return value;
+
+    const date = new Date();
+    date.setHours(Number(hours), Number(minutes), 0, 0);
+
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const formatSchedule = (item: { competitionDate?: string; startTime?: string; endTime?: string; startAt?: string }) => {
+    if (item.competitionDate && item.startTime) {
+      return `${formatDateOnly(item.competitionDate)}, ${formatTimeOnly(item.startTime)}`;
+    }
+
+    if (item.startAt) {
+      return new Date(item.startAt).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    return 'Schedule unavailable';
+  };
+
+  const formatScheduleRange = (item: { competitionDate?: string; startTime?: string; endTime?: string }) => {
+    const dateLabel = item.competitionDate ? formatDateOnly(item.competitionDate) : 'Date not set';
+    const startLabel = item.startTime ? formatTimeOnly(item.startTime) : '--:--';
+    const endLabel = item.endTime ? formatTimeOnly(item.endTime) : '--:--';
+    return `${dateLabel} · ${startLabel} to ${endLabel}`;
+  };
 
   const renderCompetitionSection = (title: string, description: string, items: any[]) => (
     <section className="competition-section">
@@ -271,7 +318,7 @@ export default function CompetitionsPage() {
                 <span><FaLayerGroup /> {competition.difficulty}</span>
               </div>
               <div className="competition-meta-row">
-                <span><FaCalendarAlt /> {formatDate(competition.startAt)}</span>
+                <span><FaCalendarAlt /> {formatSchedule(competition)}</span>
               </div>
               {competition.status === 'open' && competition.joined ? (
                 <div className="competition-card-cta">Ready to start</div>
@@ -352,7 +399,7 @@ export default function CompetitionsPage() {
 
                         <div className="competition-detail-chips">
                           <div className="detail-chip"><FaUsers /> {selectedCompetition.participantCount} participants</div>
-                          <div className="detail-chip"><FaClock /> Ends {formatDate(selectedCompetition.endAt)}</div>
+                          <div className="detail-chip"><FaClock /> {formatScheduleRange(selectedCompetition)}</div>
                           <div className="detail-chip"><FaTrophy /> {selectedCompetition.rewardPool} reward points</div>
                         </div>
 
@@ -574,7 +621,7 @@ export default function CompetitionsPage() {
                         <ul className="review-list">
                           <li>{basicInfo.name || 'Untitled competition'}</li>
                           <li>{questions.length} question(s)</li>
-                          <li>{timing.competitionDate || 'Date not set'} · {timing.startTime || '--:--'} to {timing.endTime || '--:--'}</li>
+                          <li>{formatScheduleRange(timing)}</li>
                           <li>{timing.durationMinutes || 0} minutes</li>
                         </ul>
                       </div>
@@ -615,7 +662,7 @@ export default function CompetitionsPage() {
                           <div>
                             <strong>{request.competitionName}</strong>
                             <p className="app-muted">
-                              {request.competitionDate} · {request.startTime} to {request.endTime}
+                              {formatScheduleRange(request)}
                             </p>
                           </div>
                           <span className={`competition-pill competition-pill-${request.status}`}>{request.status.replace('_', ' ')}</span>

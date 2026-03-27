@@ -44,6 +44,9 @@ const formatCompetition = (competition) => ({
   difficulty: competition.difficulty,
   startAt: competition.start_at,
   endAt: competition.end_at,
+  competitionDate: competition.competition_date || null,
+  startTime: competition.start_time || null,
+  endTime: competition.end_time || null,
   status: getCompetitionStatus(competition),
   maxParticipants: competition.max_participants,
   entryFee: competition.entry_fee,
@@ -145,6 +148,9 @@ const listCompetitions = async (req, res) => {
   try {
     const result = await query(
       `SELECT c.*,
+              cr.competition_date,
+              cr.start_time,
+              cr.end_time,
               COUNT(DISTINCT cp.user_id) AS participant_count,
               BOOL_OR(cp.user_id = $1) AS joined
        FROM competitions c
@@ -179,6 +185,9 @@ const getCompetitionById = async (req, res) => {
 
     const competitionResult = await query(
       `SELECT c.*,
+              cr.competition_date,
+              cr.start_time,
+              cr.end_time,
               COUNT(DISTINCT cp.user_id) AS participant_count,
               BOOL_OR(cp.user_id = $2) AS joined
        FROM competitions c
@@ -312,6 +321,9 @@ const getMyCompetitions = async (req, res) => {
     const [joinedResult, requestsResult] = await Promise.all([
       query(
         `SELECT c.*,
+                cr.competition_date,
+                cr.start_time,
+                cr.end_time,
                 part.joined_at,
                 COUNT(DISTINCT all_participants.user_id) AS participant_count
          FROM competition_participants part
