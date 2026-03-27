@@ -732,8 +732,44 @@ export default function ProblemDetailPage() {
           </div>
         </nav>
 
+        {isCompetitionMode ? (
+          <div className="competition-workspace-toolbar">
+            <div className="competition-workspace-breadcrumb">
+              <span className="competition-toolbar-label">Problem List</span>
+              <span className="competition-toolbar-separator">/</span>
+              <span className="competition-toolbar-title">{problem?.title}</span>
+            </div>
+            <div className="competition-toolbar-actions">
+              <select 
+                value={language} 
+                onChange={(e) => setLanguage(e.target.value)}
+                className="language-selector competition-language-selector"
+              >
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="cpp">C++</option>
+                <option value="java">Java</option>
+                <option value="c">C</option>
+              </select>
+              <button
+                onClick={handleSubmitCode}
+                disabled={submitting}
+                className="competition-submit-btn"
+              >
+                {submitting ? 'Submitting...' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className={`problem-content ${isCompetitionMode ? 'competition-workspace' : ''}`}>
           <div className={`problem-panel ${isCompetitionMode ? 'competition-problem-panel' : ''}`}>
+            {isCompetitionMode ? (
+              <div className="competition-tabs">
+                <button className="competition-tab active">Description</button>
+                <button className="competition-tab">Submissions</button>
+              </div>
+            ) : null}
             <div className="problem-header">
               <div className="problem-title-row">
                 <h1 className="problem-title">{problem?.title}</h1>
@@ -909,25 +945,31 @@ export default function ProblemDetailPage() {
                 <div className="code-editor-header">
                   <span className="code-editor-title">Code Editor</span>
                   <div className="code-editor-controls">
-                    <button
-                      type="button"
-                      onClick={handleAnalyzeCode}
-                      disabled={analyzingCode}
-                      className="code-analyze-btn"
-                    >
-                      <FaRobot /> {analyzingCode ? 'Analyzing...' : 'Analyze Code'}
-                    </button>
-                    <select 
-                      value={language} 
-                      onChange={(e) => setLanguage(e.target.value)}
-                      className="language-selector"
-                    >
-                      <option value="javascript">JavaScript</option>
-                      <option value="python">Python</option>
-                      <option value="cpp">C++</option>
-                      <option value="java">Java</option>
-                      <option value="c">C</option>
-                    </select>
+                    {!isCompetitionMode ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleAnalyzeCode}
+                          disabled={analyzingCode}
+                          className="code-analyze-btn"
+                        >
+                          <FaRobot /> {analyzingCode ? 'Analyzing...' : 'Analyze Code'}
+                        </button>
+                        <select 
+                          value={language} 
+                          onChange={(e) => setLanguage(e.target.value)}
+                          className="language-selector"
+                        >
+                          <option value="javascript">JavaScript</option>
+                          <option value="python">Python</option>
+                          <option value="cpp">C++</option>
+                          <option value="java">Java</option>
+                          <option value="c">C</option>
+                        </select>
+                      </>
+                    ) : (
+                      <span className="competition-editor-status">Auto-save enabled</span>
+                    )}
                     {syntaxErrors.length > 0 && (
                       <span className="code-editor-error-badge">
                         <FaExclamationTriangle /> {syntaxErrors.length} error{syntaxErrors.length > 1 ? 's' : ''}
@@ -935,6 +977,7 @@ export default function ProblemDetailPage() {
                     )}
                   </div>
                 </div>
+                {!isCompetitionMode ? (
                 <div className="code-hints-panel">
                   <div className="code-hints-title"><FaLightbulb /> Smart Hints</div>
                   <div className="code-hints-list">
@@ -955,7 +998,8 @@ export default function ProblemDetailPage() {
                     ))}
                   </div>
                 </div>
-                {codeAnalysis && (
+                ) : null}
+                {!isCompetitionMode && codeAnalysis && (
                   <div className="code-analysis-panel">
                     <div className="code-analysis-title"><FaRobot /> Code Analysis Suggestions</div>
                     {codeAnalysis.source && (
@@ -990,6 +1034,7 @@ export default function ProblemDetailPage() {
                     )}
                   </div>
                 )}
+                {!isCompetitionMode ? (
                 <div className="custom-test-panel">
                   <h4 className="custom-test-title">Custom Test Runner</h4>
                   <p className="custom-test-subtitle">
@@ -1037,6 +1082,7 @@ export default function ProblemDetailPage() {
                     </div>
                   )}
                 </div>
+                ) : null}
                 <Editor
                   height="500px"
                   language={language}
@@ -1124,7 +1170,7 @@ export default function ProblemDetailPage() {
                   {showCodeEditor ? 'Hide' : 'Show'} Code Editor
                 </button>
               ) : null}
-              {(showCodeEditor || isCompetitionMode) ? (
+              {(showCodeEditor || isCompetitionMode) && !isCompetitionMode ? (
                 <button
                   onClick={handleSubmitCode}
                   disabled={submitting}
@@ -1135,8 +1181,13 @@ export default function ProblemDetailPage() {
               ) : null}
             </div>
 
-            {codeSubmission && (
-              <div className="submission-results" style={{ marginTop: '2rem' }}>
+            {(codeSubmission || isCompetitionMode) && (
+              <div className={`submission-results ${isCompetitionMode ? 'competition-results-panel' : ''}`} style={{ marginTop: '2rem' }}>
+                {isCompetitionMode ? (
+                  <div className="competition-results-header">Test Result</div>
+                ) : null}
+                {codeSubmission ? (
+                <>
                 <div className={`submission-status ${codeSubmission.status}`}>
                   {getStatusIcon(codeSubmission.status)}
                   <span>
@@ -1256,6 +1307,10 @@ export default function ProblemDetailPage() {
                     ))}
                   </div>
                 )}
+                </>
+                ) : isCompetitionMode ? (
+                  <div className="competition-results-placeholder">Submit your code to see the latest competition verdict.</div>
+                ) : null}
               </div>
             )}
 
@@ -1278,6 +1333,7 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
+            {!isCompetitionMode ? (
             <div className="history-section">
               <h3 className="problem-section-title">Submission History</h3>
               {loadingHistory ? (
@@ -1323,6 +1379,7 @@ export default function ProblemDetailPage() {
                 </>
               )}
             </div>
+            ) : null}
           </div>
         </div>
       </div>
