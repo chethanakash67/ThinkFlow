@@ -140,7 +140,7 @@ export default function CompetitionsPage() {
       return;
     }
 
-    router.push(`/problems/${firstProblemId}`);
+    router.push(`/problems/${firstProblemId}?mode=competition&from=competitions`);
   };
 
   const handleQuestionCountChange = (count: number) => {

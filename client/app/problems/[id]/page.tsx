@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { getCurrentUser, logout } from '@/lib/auth'
@@ -27,7 +27,9 @@ interface EditorHint {
 export default function ProblemDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const problemId = params.id as string
+  const isCompetitionMode = searchParams.get('mode') === 'competition'
 
   const [problem, setProblem] = useState<any>(null)
   const [logicSteps, setLogicSteps] = useState<LogicStep[]>([])
@@ -38,7 +40,7 @@ export default function ProblemDetailPage() {
   const [executionSteps, setExecutionSteps] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [showCodeEditor, setShowCodeEditor] = useState(false)
+  const [showCodeEditor, setShowCodeEditor] = useState(isCompetitionMode)
   const [user, setUser] = useState<any>(null)
   const [aiSuggestion, setAiSuggestion] = useState('')
   const [loadingSuggestion, setLoadingSuggestion] = useState(false)
@@ -74,6 +76,12 @@ export default function ProblemDetailPage() {
     draftLoadedRef.current = false
     setDraftSavedAt('')
   }, [problemId])
+
+  useEffect(() => {
+    if (isCompetitionMode) {
+      setShowCodeEditor(true)
+    }
+  }, [isCompetitionMode])
 
   // Clear syntax errors when language changes
   useEffect(() => {
@@ -545,7 +553,7 @@ export default function ProblemDetailPage() {
         question: 'Analyze my current code and suggest targeted fixes and edge-case checks.',
         code,
         language,
-        logicSteps: logicSteps.map(({ step_number, ...rest }) => rest)
+        logicSteps: isCompetitionMode ? [] : logicSteps.map(({ step_number, ...rest }) => rest)
       })
       setCodeAnalysis(response.data.help)
     } catch (error: any) {
@@ -705,7 +713,7 @@ export default function ProblemDetailPage() {
   return (
     <ProtectedRoute>
       <div className="problem-detail-container">
-        <nav className="problem-navbar">
+        <nav className={`problem-navbar ${isCompetitionMode ? 'competition-problem-navbar' : ''}`}>
           <div className="problem-navbar-content">
             <div className="problem-brand" onClick={() => router.push('/dashboard')}>
               <div className="problem-brand-icon">
@@ -714,8 +722,8 @@ export default function ProblemDetailPage() {
               <span className="problem-brand-text">ThinkFlow</span>
             </div>
             <div className="problem-navbar-actions">
-              <button onClick={() => router.push('/problems')} className="problem-back-btn">
-                <FaArrowLeft /> Back to Problems
+              <button onClick={() => router.push(isCompetitionMode ? '/competitions' : '/problems')} className="problem-back-btn">
+                <FaArrowLeft /> {isCompetitionMode ? 'Back to Competitions' : 'Back to Problems'}
               </button>
               <button onClick={handleLogout} className="problem-logout-btn">
                 <FaSignOutAlt /> Logout
@@ -724,8 +732,8 @@ export default function ProblemDetailPage() {
           </div>
         </nav>
 
-        <div className="problem-content">
-          <div className="problem-panel">
+        <div className={`problem-content ${isCompetitionMode ? 'competition-workspace' : ''}`}>
+          <div className={`problem-panel ${isCompetitionMode ? 'competition-problem-panel' : ''}`}>
             <div className="problem-header">
               <div className="problem-title-row">
                 <h1 className="problem-title">{problem?.title}</h1>
@@ -733,6 +741,12 @@ export default function ProblemDetailPage() {
                   {problem?.difficulty}
                 </span>
               </div>
+              {isCompetitionMode ? (
+                <div className="competition-problem-meta">
+                  <span className="competition-mode-badge">Competition Mode</span>
+                  <span className="competition-mode-note">Code directly and submit like a live contest round.</span>
+                </div>
+              ) : null}
             </div>
 
             <div className="problem-section">
@@ -771,10 +785,14 @@ export default function ProblemDetailPage() {
             )}
           </div>
 
-          <div className="solution-panel">
+          <div className={`solution-panel ${isCompetitionMode ? 'competition-solution-panel' : ''}`}>
             <div className="solution-header">
-              <h2 className="solution-title">Solution Logic</h2>
-              <p className="solution-subtitle">Break down your solution into structured steps. Be specific about what each step does.</p>
+              <h2 className="solution-title">{isCompetitionMode ? 'Code Editor' : 'Solution Logic'}</h2>
+              <p className="solution-subtitle">
+                {isCompetitionMode
+                  ? 'Write, test, and submit your solution in a focused contest workspace.'
+                  : 'Break down your solution into structured steps. Be specific about what each step does.'}
+              </p>
               <div className="draft-status-row">
                 <span className="draft-status-text">
                   Draft autosave: {draftSavedAt ? `saved at ${draftSavedAt}` : 'waiting for your first edit'}
@@ -783,24 +801,26 @@ export default function ProblemDetailPage() {
                   Clear Draft
                 </button>
               </div>
-              <button 
-                onClick={getAISuggestion} 
-                disabled={loadingSuggestion}
-                className="btn btn-ai-suggestion"
-              >
-                {loadingSuggestion ? (
-                  <>
-                    <FaRobot /> Thinking...
-                  </>
-                ) : (
-                  <>
-                    <FaLightbulb /> Get AI Suggestion
-                  </>
-                )}
-              </button>
+              {!isCompetitionMode ? (
+                <button 
+                  onClick={getAISuggestion} 
+                  disabled={loadingSuggestion}
+                  className="btn btn-ai-suggestion"
+                >
+                  {loadingSuggestion ? (
+                    <>
+                      <FaRobot /> Thinking...
+                    </>
+                  ) : (
+                    <>
+                      <FaLightbulb /> Get AI Suggestion
+                    </>
+                  )}
+                </button>
+              ) : null}
             </div>
 
-            {aiSuggestion && (
+            {!isCompetitionMode && aiSuggestion && (
               <div className="ai-suggestion-box">
                 <div className="ai-suggestion-header">
                   <span className="ai-badge"><FaRobot /> AI Assistant</span>
@@ -813,6 +833,7 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
+            {!isCompetitionMode ? (
             <div className="logic-steps-container">
               {logicSteps.map((step, index) => (
                 <div key={index} className="logic-step">
@@ -847,24 +868,27 @@ export default function ProblemDetailPage() {
                 </div>
               ))}
             </div>
+            ) : null}
 
-            <div className="action-buttons">
-              <button onClick={addLogicStep} className="btn btn-secondary">
-                <FaPlus /> Add Step
-              </button>
-              <button onClick={getAISuggestion} disabled={loadingSuggestion} className="btn btn-ai">
-                <FaLightbulb /> {loadingSuggestion ? 'Loading...' : 'Need Help?'}
-              </button>
-              <button
-                onClick={handleSubmitLogic}
-                disabled={submitting}
-                className="btn btn-primary"
-              >
-                {submitting ? 'Submitting...' : 'Submit Logic for Evaluation'}
-              </button>
-            </div>
+            {!isCompetitionMode ? (
+              <div className="action-buttons">
+                <button onClick={addLogicStep} className="btn btn-secondary">
+                  <FaPlus /> Add Step
+                </button>
+                <button onClick={getAISuggestion} disabled={loadingSuggestion} className="btn btn-ai">
+                  <FaLightbulb /> {loadingSuggestion ? 'Loading...' : 'Need Help?'}
+                </button>
+                <button
+                  onClick={handleSubmitLogic}
+                  disabled={submitting}
+                  className="btn btn-primary"
+                >
+                  {submitting ? 'Submitting...' : 'Submit Logic for Evaluation'}
+                </button>
+              </div>
+            ) : null}
 
-            {submission && (
+            {!isCompetitionMode && submission && (
               <div className="submission-results">
                 <div className={`submission-status ${submission.status}`}>
                   {getStatusIcon(submission.status)}
@@ -880,7 +904,7 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            {showCodeEditor && (
+            {(showCodeEditor || isCompetitionMode) && (
               <div className="code-editor-container">
                 <div className="code-editor-header">
                   <span className="code-editor-title">Code Editor</span>
@@ -1091,22 +1115,24 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            <div className="action-buttons" style={{ marginTop: '2rem' }}>
-              <button
-                onClick={() => setShowCodeEditor(!showCodeEditor)}
-                className="btn btn-secondary"
-              >
-                {showCodeEditor ? 'Hide' : 'Show'} Code Editor
-              </button>
-              {showCodeEditor && (
+            <div className={`action-buttons ${isCompetitionMode ? 'competition-code-actions' : ''}`} style={{ marginTop: '2rem' }}>
+              {!isCompetitionMode ? (
+                <button
+                  onClick={() => setShowCodeEditor(!showCodeEditor)}
+                  className="btn btn-secondary"
+                >
+                  {showCodeEditor ? 'Hide' : 'Show'} Code Editor
+                </button>
+              ) : null}
+              {(showCodeEditor || isCompetitionMode) ? (
                 <button
                   onClick={handleSubmitCode}
                   disabled={submitting}
                   className="btn btn-primary"
                 >
-                  {submitting ? 'Submitting...' : 'Submit Code'}
+                  {submitting ? 'Submitting...' : isCompetitionMode ? 'Submit Solution' : 'Submit Code'}
                 </button>
-              )}
+              ) : null}
             </div>
 
             {codeSubmission && (
@@ -1233,7 +1259,7 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            {executionSteps.length > 0 && (
+            {!isCompetitionMode && executionSteps.length > 0 && (
               <div className="execution-steps">
                 <h3 className="problem-section-title">Step-by-Step Execution</h3>
                 {executionSteps.map((step, index) => (
@@ -1258,6 +1284,7 @@ export default function ProblemDetailPage() {
                 <p className="history-loading">Loading history...</p>
               ) : (
                 <>
+                  {!isCompetitionMode ? (
                   <div className="history-block">
                     <h4 className="history-block-title">Logic Attempts</h4>
                     {logicHistory.length === 0 ? (
@@ -1275,6 +1302,7 @@ export default function ProblemDetailPage() {
                       </div>
                     )}
                   </div>
+                  ) : null}
                   <div className="history-block">
                     <h4 className="history-block-title">Code Attempts</h4>
                     {codeHistory.length === 0 ? (
