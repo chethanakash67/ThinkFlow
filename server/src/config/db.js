@@ -575,13 +575,6 @@ const init = async () => {
       console.log('  ✓ Sample problems added');
     }
 
-    const competitionCount = await dbPool.query('SELECT COUNT(*) FROM competitions');
-    if (parseInt(competitionCount.rows[0].count) === 0) {
-      console.log('📝 Seeding competitions...');
-      await seedCompetitions(dbPool);
-      console.log('  ✓ Competitions added');
-    }
-
     console.log('\n✅ Database schema initialized successfully');
     return true;
   } catch (error) {
@@ -1465,16 +1458,6 @@ const runMigrations = async () => {
     console.log('  ✓ Competition indexes ready');
   } catch (error) {
     console.error(`  ❌ Competition indexes: ${error.message}`);
-  }
-
-  try {
-    const competitionCount = await dbPool.query('SELECT COUNT(*) FROM competitions');
-    if (parseInt(competitionCount.rows[0].count, 10) === 0) {
-      await seedCompetitions(dbPool);
-      console.log('  ✓ Competition seed data ready');
-    }
-  } catch (error) {
-    console.error(`  ❌ Competition seed: ${error.message}`);
   }
 
   // Keep only the newest row for each normalized problem title

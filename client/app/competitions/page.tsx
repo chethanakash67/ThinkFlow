@@ -2,6 +2,7 @@
 
 import './competitions.css';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   FaCalendarAlt,
   FaCheckCircle,
@@ -38,6 +39,7 @@ const createEmptyQuestion = (): CompetitionQuestion => ({
 });
 
 export default function CompetitionsPage() {
+  const router = useRouter();
   const [competitions, setCompetitions] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedCompetition, setSelectedCompetition] = useState<any>(null);
@@ -118,17 +120,27 @@ export default function CompetitionsPage() {
     }
   };
 
-  const handleJoin = async (competitionId: number) => {
+  const handleRegister = async (competitionId: number) => {
     try {
       setJoiningId(competitionId);
       await api.post(`/competitions/${competitionId}/join`);
       await loadPageData(competitionId);
     } catch (error: any) {
-      console.error('Failed to join competition:', error);
-      window.alert(error.response?.data?.error || 'Failed to join competition');
+      console.error('Failed to register for competition:', error);
+      window.alert(error.response?.data?.error || 'Failed to register for competition');
     } finally {
       setJoiningId(null);
     }
+  };
+
+  const handleStartCompetition = () => {
+    const firstProblemId = problems[0]?.id;
+    if (!firstProblemId) {
+      window.alert('This competition does not have any problems yet.');
+      return;
+    }
+
+    router.push(`/problems/${firstProblemId}`);
   };
 
   const handleQuestionCountChange = (count: number) => {
@@ -178,6 +190,38 @@ export default function CompetitionsPage() {
     }
   };
 
+  const getPrimaryAction = (competition: any) => {
+    if (!competition) return null;
+
+    if (competition.status === 'open' && competition.joined) {
+      return {
+        label: 'Start Competition',
+        onClick: handleStartCompetition,
+        disabled: false,
+        variant: 'primary',
+        icon: <FaCheckCircle />,
+      };
+    }
+
+    if (competition.joined) {
+      return {
+        label: 'Registered',
+        onClick: () => {},
+        disabled: true,
+        variant: 'secondary',
+        icon: <FaCheckCircle />,
+      };
+    }
+
+    return {
+      label: joiningId === competition.id ? 'Registering...' : 'Register Competition',
+      onClick: () => handleRegister(competition.id),
+      disabled: joiningId === competition.id,
+      variant: 'primary',
+      icon: null,
+    };
+  };
+
   const groupedCompetitions = useMemo(() => {
     const groups = {
       active: competitions.filter((competition) => competition.status === 'open'),
@@ -218,7 +262,7 @@ export default function CompetitionsPage() {
             >
               <div className="competition-overview-top">
                 <span className={`competition-pill competition-pill-${competition.status}`}>{competition.status}</span>
-                {competition.joined ? <span className="joined-pill">Joined</span> : null}
+                {competition.joined ? <span className="joined-pill">Registered</span> : null}
               </div>
               <h3>{competition.title}</h3>
               <p>{competition.description}</p>
@@ -229,12 +273,21 @@ export default function CompetitionsPage() {
               <div className="competition-meta-row">
                 <span><FaCalendarAlt /> {formatDate(competition.startAt)}</span>
               </div>
+              {competition.status === 'open' && competition.joined ? (
+                <div className="competition-card-cta">Ready to start</div>
+              ) : competition.joined ? (
+                <div className="competition-card-cta">Registered for this competition</div>
+              ) : (
+                <div className="competition-card-cta">Registration open</div>
+              )}
             </button>
           ))
         )}
       </div>
     </section>
   );
+
+  const primaryAction = getPrimaryAction(selectedCompetition);
 
   return (
     <ProtectedRoute>
@@ -285,19 +338,16 @@ export default function CompetitionsPage() {
                             <h2>{selectedCompetition.title}</h2>
                             <p className="app-muted">{selectedCompetition.description}</p>
                           </div>
-                          {selectedCompetition.joined ? (
-                            <button className="app-button secondary" disabled>
-                              <FaCheckCircle /> Joined
-                            </button>
-                          ) : (
+                          {primaryAction ? (
                             <button
-                              className="app-button"
-                              onClick={() => handleJoin(selectedCompetition.id)}
-                              disabled={joiningId === selectedCompetition.id}
+                              className={`app-button ${primaryAction.variant === 'secondary' ? 'secondary' : ''}`}
+                              onClick={primaryAction.onClick}
+                              disabled={primaryAction.disabled}
                             >
-                              {joiningId === selectedCompetition.id ? 'Joining...' : 'Join Competition'}
+                              {primaryAction.icon}
+                              {primaryAction.label}
                             </button>
-                          )}
+                          ) : null}
                         </div>
 
                         <div className="competition-detail-chips">

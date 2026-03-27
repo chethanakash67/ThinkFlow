@@ -148,6 +148,9 @@ const listCompetitions = async (req, res) => {
               COUNT(DISTINCT cp.user_id) AS participant_count,
               BOOL_OR(cp.user_id = $1) AS joined
        FROM competitions c
+       JOIN competition_requests cr
+         ON cr.approved_competition_id = c.id
+        AND cr.status = 'approved'
        LEFT JOIN competition_participants cp ON cp.competition_id = c.id
        WHERE c.status IN ('upcoming', 'open', 'completed')
        GROUP BY c.id
@@ -179,6 +182,9 @@ const getCompetitionById = async (req, res) => {
               COUNT(DISTINCT cp.user_id) AS participant_count,
               BOOL_OR(cp.user_id = $2) AS joined
        FROM competitions c
+       JOIN competition_requests cr
+         ON cr.approved_competition_id = c.id
+        AND cr.status = 'approved'
        LEFT JOIN competition_participants cp ON cp.competition_id = c.id
        WHERE c.id = $1
        GROUP BY c.id`,
@@ -255,9 +261,12 @@ const joinCompetition = async (req, res) => {
     const { competitionId } = req.params;
 
     const competitionResult = await query(
-      `SELECT id, title, status, max_participants, start_at, end_at
-       FROM competitions
-       WHERE id = $1`,
+      `SELECT c.id, c.title, c.status, c.max_participants, c.start_at, c.end_at
+       FROM competitions c
+       JOIN competition_requests cr
+         ON cr.approved_competition_id = c.id
+        AND cr.status = 'approved'
+       WHERE c.id = $1`,
       [competitionId]
     );
 
@@ -290,7 +299,7 @@ const joinCompetition = async (req, res) => {
 
     return res.json({
       success: true,
-      message: `You joined ${competition.title}`,
+      message: `You registered for ${competition.title}`,
     });
   } catch (error) {
     console.error('Join competition error:', error.message);
@@ -307,6 +316,9 @@ const getMyCompetitions = async (req, res) => {
                 COUNT(DISTINCT all_participants.user_id) AS participant_count
          FROM competition_participants part
          JOIN competitions c ON c.id = part.competition_id
+         JOIN competition_requests cr
+           ON cr.approved_competition_id = c.id
+          AND cr.status = 'approved'
          LEFT JOIN competition_participants all_participants ON all_participants.competition_id = c.id
          WHERE part.user_id = $1
          GROUP BY c.id, part.joined_at

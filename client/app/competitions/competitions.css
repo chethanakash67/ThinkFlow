@@ -175,6 +175,13 @@
   line-height: 1.65;
 }
 
+.competition-card-cta {
+  margin-top: 1rem;
+  color: #4f46e5;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .competition-meta-row {
   gap: 0.95rem;
   flex-wrap: wrap;
