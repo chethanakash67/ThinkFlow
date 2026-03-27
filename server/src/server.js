@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const { assertEncryptionConfigured } = require('./utils/secureData');
 const authRoutes = require('./routes/auth.routes'); // ✓ Using OTP-based routes
 const problemRoutes = require('../routes/problemRoutes');
 const submissionRoutes = require('../routes/submissionRoutes');
@@ -65,6 +66,7 @@ app.use((err, req, res, next) => {
 // Start server
 async function startServer() {
   try {
+    assertEncryptionConfigured();
     await initDB();
     await runMigrations(); // Run migrations to add missing columns
     app.listen(PORT, () => {

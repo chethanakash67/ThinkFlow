@@ -5,6 +5,7 @@
 const { Pool, Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
+const { decryptText, encryptText, hashLookupValue } = require('../utils/secureData');
 
 // Database configuration from environment
 // Support both DATABASE_URL (Render/Heroku style) and individual variables
@@ -333,15 +334,20 @@ const init = async () => {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255),
+        email_encrypted TEXT NOT NULL,
+        email_sha256 VARCHAR(64) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         role VARCHAR(50) DEFAULT 'user',
         bio TEXT,
+        bio_encrypted TEXT,
         country VARCHAR(120),
+        country_encrypted TEXT,
         github_url VARCHAR(255),
+        github_url_encrypted TEXT,
         preferred_language VARCHAR(50),
         email_verified BOOLEAN DEFAULT FALSE,
-        otp_code VARCHAR(6),
+        otp_code VARCHAR(255),
         otp_expires TIMESTAMP,
         otp_type VARCHAR(50),
         email_verification_token VARCHAR(255),
@@ -427,7 +433,7 @@ const init = async () => {
         full_name VARCHAR(255) NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
-        otp VARCHAR(6) NOT NULL,
+        otp VARCHAR(255) NOT NULL,
         otp_expiry TIMESTAMP NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -484,9 +490,13 @@ const init = async () => {
         id SERIAL PRIMARY KEY,
         creator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         creator_name VARCHAR(255) NOT NULL,
-        creator_email VARCHAR(255) NOT NULL,
-        creator_phone VARCHAR(50) NOT NULL,
-        organization_name VARCHAR(255),
+        creator_email TEXT,
+        creator_email_encrypted TEXT,
+        creator_email_sha256 VARCHAR(64),
+        creator_phone TEXT,
+        creator_phone_encrypted TEXT,
+        organization_name TEXT,
+        organization_name_encrypted TEXT,
         competition_name VARCHAR(255) NOT NULL,
         competition_date DATE NOT NULL,
         start_time VARCHAR(20) NOT NULL,
@@ -1279,7 +1289,17 @@ const runMigrations = async () => {
     {
       name: 'Add otp_code to users',
       check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'otp_code'`,
-      run: `ALTER TABLE users ADD COLUMN otp_code VARCHAR(6)`
+      run: `ALTER TABLE users ADD COLUMN otp_code VARCHAR(255)`
+    },
+    {
+      name: 'Add email_encrypted to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'email_encrypted'`,
+      run: `ALTER TABLE users ADD COLUMN email_encrypted TEXT`
+    },
+    {
+      name: 'Add email_sha256 to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'email_sha256'`,
+      run: `ALTER TABLE users ADD COLUMN email_sha256 VARCHAR(64)`
     },
     {
       name: 'Add otp_expires to users',
@@ -1302,14 +1322,29 @@ const runMigrations = async () => {
       run: `ALTER TABLE users ADD COLUMN bio TEXT`
     },
     {
+      name: 'Add bio_encrypted to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'bio_encrypted'`,
+      run: `ALTER TABLE users ADD COLUMN bio_encrypted TEXT`
+    },
+    {
       name: 'Add country to users',
       check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'country'`,
       run: `ALTER TABLE users ADD COLUMN country VARCHAR(120)`
     },
     {
+      name: 'Add country_encrypted to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'country_encrypted'`,
+      run: `ALTER TABLE users ADD COLUMN country_encrypted TEXT`
+    },
+    {
       name: 'Add github_url to users',
       check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'github_url'`,
       run: `ALTER TABLE users ADD COLUMN github_url VARCHAR(255)`
+    },
+    {
+      name: 'Add github_url_encrypted to users',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'github_url_encrypted'`,
+      run: `ALTER TABLE users ADD COLUMN github_url_encrypted TEXT`
     },
     {
       name: 'Add preferred_language to users',
@@ -1378,9 +1413,13 @@ const runMigrations = async () => {
         id SERIAL PRIMARY KEY,
         creator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         creator_name VARCHAR(255) NOT NULL,
-        creator_email VARCHAR(255) NOT NULL,
-        creator_phone VARCHAR(50) NOT NULL,
-        organization_name VARCHAR(255),
+        creator_email TEXT,
+        creator_email_encrypted TEXT,
+        creator_email_sha256 VARCHAR(64),
+        creator_phone TEXT,
+        creator_phone_encrypted TEXT,
+        organization_name TEXT,
+        organization_name_encrypted TEXT,
         competition_name VARCHAR(255) NOT NULL,
         competition_date DATE NOT NULL,
         start_time VARCHAR(20) NOT NULL,
@@ -1397,6 +1436,26 @@ const runMigrations = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )`
+    },
+    {
+      name: 'Add creator_email_encrypted to competition_requests',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'competition_requests' AND column_name = 'creator_email_encrypted'`,
+      run: `ALTER TABLE competition_requests ADD COLUMN creator_email_encrypted TEXT`
+    },
+    {
+      name: 'Add creator_email_sha256 to competition_requests',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'competition_requests' AND column_name = 'creator_email_sha256'`,
+      run: `ALTER TABLE competition_requests ADD COLUMN creator_email_sha256 VARCHAR(64)`
+    },
+    {
+      name: 'Add creator_phone_encrypted to competition_requests',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'competition_requests' AND column_name = 'creator_phone_encrypted'`,
+      run: `ALTER TABLE competition_requests ADD COLUMN creator_phone_encrypted TEXT`
+    },
+    {
+      name: 'Add organization_name_encrypted to competition_requests',
+      check: `SELECT column_name FROM information_schema.columns WHERE table_name = 'competition_requests' AND column_name = 'organization_name_encrypted'`,
+      run: `ALTER TABLE competition_requests ADD COLUMN organization_name_encrypted TEXT`
     },
     {
       name: 'Create competition_request_questions table',
@@ -1447,6 +1506,139 @@ const runMigrations = async () => {
   }
 
   try {
+    await dbPool.query('ALTER TABLE IF EXISTS users ALTER COLUMN otp_code TYPE VARCHAR(255)');
+    await dbPool.query('ALTER TABLE IF EXISTS pending_registrations ALTER COLUMN otp TYPE VARCHAR(255)');
+    await dbPool.query('ALTER TABLE IF EXISTS competition_requests ALTER COLUMN creator_email TYPE TEXT');
+    await dbPool.query('ALTER TABLE IF EXISTS competition_requests ALTER COLUMN creator_phone TYPE TEXT');
+    await dbPool.query('ALTER TABLE IF EXISTS competition_requests ALTER COLUMN organization_name TYPE TEXT');
+    await dbPool.query('ALTER TABLE IF EXISTS users ALTER COLUMN email DROP NOT NULL');
+    await dbPool.query('ALTER TABLE IF EXISTS competition_requests ALTER COLUMN creator_email DROP NOT NULL');
+    await dbPool.query('ALTER TABLE IF EXISTS competition_requests ALTER COLUMN creator_phone DROP NOT NULL');
+    console.log('  ✓ Security column migrations ready');
+  } catch (error) {
+    console.error(`  ❌ Security column migrations: ${error.message}`);
+  }
+
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS users_pii_backup (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        email_backup_encrypted TEXT,
+        bio_backup_encrypted TEXT,
+        country_backup_encrypted TEXT,
+        github_url_backup_encrypted TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS competition_request_pii_backup (
+        request_id INTEGER PRIMARY KEY REFERENCES competition_requests(id) ON DELETE CASCADE,
+        creator_email_backup_encrypted TEXT,
+        creator_phone_backup_encrypted TEXT,
+        organization_name_backup_encrypted TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ PII backup tables ready');
+  } catch (error) {
+    console.error(`  ❌ PII backup tables: ${error.message}`);
+  }
+
+  try {
+    const usersResult = await dbPool.query(`
+      SELECT id, email, email_encrypted, email_sha256, bio, bio_encrypted, country, country_encrypted, github_url, github_url_encrypted
+      FROM users
+    `);
+
+    for (const user of usersResult.rows) {
+      const sourceEmail = decryptText(user.email_encrypted || user.email);
+      const sourceBio = decryptText(user.bio_encrypted || user.bio);
+      const sourceCountry = decryptText(user.country_encrypted || user.country);
+      const sourceGithub = decryptText(user.github_url_encrypted || user.github_url);
+
+      const emailEncrypted = sourceEmail ? encryptText(sourceEmail) : null;
+      const emailHash = sourceEmail ? hashLookupValue(sourceEmail) : null;
+      const bioEncrypted = sourceBio ? encryptText(sourceBio) : null;
+      const countryEncrypted = sourceCountry ? encryptText(sourceCountry) : null;
+      const githubEncrypted = sourceGithub ? encryptText(sourceGithub) : null;
+
+      await dbPool.query(
+        `INSERT INTO users_pii_backup (user_id, email_backup_encrypted, bio_backup_encrypted, country_backup_encrypted, github_url_backup_encrypted)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id) DO UPDATE SET
+           email_backup_encrypted = COALESCE(users_pii_backup.email_backup_encrypted, EXCLUDED.email_backup_encrypted),
+           bio_backup_encrypted = COALESCE(users_pii_backup.bio_backup_encrypted, EXCLUDED.bio_backup_encrypted),
+           country_backup_encrypted = COALESCE(users_pii_backup.country_backup_encrypted, EXCLUDED.country_backup_encrypted),
+           github_url_backup_encrypted = COALESCE(users_pii_backup.github_url_backup_encrypted, EXCLUDED.github_url_backup_encrypted)`,
+        [user.id, emailEncrypted, bioEncrypted, countryEncrypted, githubEncrypted]
+      );
+
+      await dbPool.query(
+        `UPDATE users
+         SET email_encrypted = COALESCE($1, email_encrypted),
+             email_sha256 = COALESCE($2, email_sha256),
+             bio_encrypted = COALESCE($3, bio_encrypted),
+             country_encrypted = COALESCE($4, country_encrypted),
+             github_url_encrypted = COALESCE($5, github_url_encrypted),
+             email = CASE WHEN $1 IS NOT NULL THEN NULL ELSE email END,
+             bio = CASE WHEN $3 IS NOT NULL THEN NULL ELSE bio END,
+             country = CASE WHEN $4 IS NOT NULL THEN NULL ELSE country END,
+             github_url = CASE WHEN $5 IS NOT NULL THEN NULL ELSE github_url END
+         WHERE id = $6`,
+        [emailEncrypted, emailHash, bioEncrypted, countryEncrypted, githubEncrypted, user.id]
+      );
+    }
+
+    const requestResult = await dbPool.query(`
+      SELECT id, creator_email, creator_email_encrypted, creator_phone, creator_phone_encrypted,
+             organization_name, organization_name_encrypted
+      FROM competition_requests
+    `);
+
+    for (const request of requestResult.rows) {
+      const creatorEmail = decryptText(request.creator_email_encrypted || request.creator_email);
+      const creatorPhone = decryptText(request.creator_phone_encrypted || request.creator_phone);
+      const organizationName = decryptText(request.organization_name_encrypted || request.organization_name);
+
+      const creatorEmailEncrypted = creatorEmail ? encryptText(creatorEmail) : null;
+      const creatorPhoneEncrypted = creatorPhone ? encryptText(creatorPhone) : null;
+      const organizationEncrypted = organizationName ? encryptText(organizationName) : null;
+
+      await dbPool.query(
+        `INSERT INTO competition_request_pii_backup (
+           request_id,
+           creator_email_backup_encrypted,
+           creator_phone_backup_encrypted,
+           organization_name_backup_encrypted
+         )
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (request_id) DO UPDATE SET
+           creator_email_backup_encrypted = COALESCE(competition_request_pii_backup.creator_email_backup_encrypted, EXCLUDED.creator_email_backup_encrypted),
+           creator_phone_backup_encrypted = COALESCE(competition_request_pii_backup.creator_phone_backup_encrypted, EXCLUDED.creator_phone_backup_encrypted),
+           organization_name_backup_encrypted = COALESCE(competition_request_pii_backup.organization_name_backup_encrypted, EXCLUDED.organization_name_backup_encrypted)`,
+        [request.id, creatorEmailEncrypted, creatorPhoneEncrypted, organizationEncrypted]
+      );
+
+      await dbPool.query(
+        `UPDATE competition_requests
+         SET creator_email_encrypted = COALESCE($1, creator_email_encrypted),
+             creator_email_sha256 = COALESCE($2, creator_email_sha256),
+             creator_phone_encrypted = COALESCE($3, creator_phone_encrypted),
+             organization_name_encrypted = COALESCE($4, organization_name_encrypted),
+             creator_email = CASE WHEN $1 IS NOT NULL THEN NULL ELSE creator_email END,
+             creator_phone = CASE WHEN $3 IS NOT NULL THEN NULL ELSE creator_phone END,
+             organization_name = CASE WHEN $4 IS NOT NULL THEN NULL ELSE organization_name END
+         WHERE id = $5`,
+        [creatorEmailEncrypted, hashLookupValue(creatorEmail), creatorPhoneEncrypted, organizationEncrypted, request.id]
+      );
+    }
+
+    console.log('  ✓ PII encryption migration complete');
+  } catch (error) {
+    console.error(`  ❌ PII encryption migration: ${error.message}`);
+  }
+
+  try {
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competitions_status ON competitions(status)');
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_problems_competition ON competition_problems(competition_id)');
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_participants_competition ON competition_participants(competition_id)');
@@ -1455,6 +1647,8 @@ const runMigrations = async () => {
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_request_questions_request ON competition_request_questions(request_id)');
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_user_points_user ON user_points(user_id)');
     await dbPool.query('CREATE INDEX IF NOT EXISTS idx_user_points_awarded_at ON user_points(awarded_at)');
+    await dbPool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_sha256 ON users(email_sha256)');
+    await dbPool.query('CREATE INDEX IF NOT EXISTS idx_competition_requests_creator_email_sha256 ON competition_requests(creator_email_sha256)');
     console.log('  ✓ Competition indexes ready');
   } catch (error) {
     console.error(`  ❌ Competition indexes: ${error.message}`);

@@ -9,6 +9,13 @@ const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
 const { getUserPointsSummary, getUserRanks } = require('../../services/gamificationService');
+const {
+  decryptText,
+  encryptText,
+  hashLookupValue,
+  hashOtp,
+  verifyStoredOtp,
+} = require('../utils/secureData');
 
 
 const { sendOTPEmail } = require('../services/emailService');
@@ -31,6 +38,38 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+const normalizeEmail = (email) => email.trim().toLowerCase();
+
+const userSelectColumns = `
+  id,
+  name,
+  email,
+  email_encrypted,
+  email_sha256,
+  password_hash,
+  role,
+  bio,
+  bio_encrypted,
+  country,
+  country_encrypted,
+  github_url,
+  github_url_encrypted,
+  preferred_language,
+  email_verified,
+  otp_code,
+  otp_expires,
+  otp_type,
+  created_at
+`;
+
+const hydrateUserRow = (user) => ({
+  ...user,
+  email: decryptText(user.email_encrypted || user.email),
+  bio: decryptText(user.bio_encrypted || user.bio),
+  country: decryptText(user.country_encrypted || user.country),
+  github_url: decryptText(user.github_url_encrypted || user.github_url),
+});
+
 /**
  * User Signup - Step 1: Send OTP
  * POST /api/auth/signup
@@ -48,14 +87,18 @@ const signup = async (req, res) => {
     const { name, email, password } = req.body;
 
     // Normalize email
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
+    const emailHash = hashLookupValue(normalizedEmail);
 
     console.log(`\n📝 Signup request for: ${normalizedEmail}`);
 
     // Check if user already exists
     let existingUser;
     try {
-      existingUser = await query('SELECT id, email_verified FROM users WHERE email = $1', [normalizedEmail]);
+      existingUser = await query(
+        'SELECT id, email_verified FROM users WHERE email_sha256 = $1',
+        [emailHash]
+      );
     } catch (dbError) {
       console.error('❌ Database error checking user:', dbError.message);
       return res.status(500).json({
@@ -83,7 +126,8 @@ const signup = async (req, res) => {
     const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    console.log(`  🔐 Generated OTP: ${otpCode}`);
+    const otpHash = await hashOtp(otpCode);
+    console.log('  🔐 Generated signup OTP');
     console.log(`  ⏰ Expires: ${otpExpires.toLocaleString()}`);
 
     // Store user data (or update if exists)
@@ -92,17 +136,17 @@ const signup = async (req, res) => {
         // Update existing unverified user
         await query(
           `UPDATE users 
-           SET name = $1, password_hash = $2, otp_code = $3, otp_expires = $4, otp_type = 'signup'
-           WHERE email = $5`,
-          [name.trim(), passwordHash, otpCode, otpExpires, normalizedEmail]
+           SET name = $1, email_encrypted = $2, email_sha256 = $3, password_hash = $4, otp_code = $5, otp_expires = $6, otp_type = 'signup'
+           WHERE id = $7`,
+          [name.trim(), encryptText(normalizedEmail), emailHash, passwordHash, otpHash, otpExpires, existingUser.rows[0].id]
         );
         console.log(`  ✅ Updated user record`);
       } else {
         // Insert new user (not verified yet)
         await query(
-          `INSERT INTO users (name, email, password_hash, otp_code, otp_expires, otp_type, email_verified)
-           VALUES ($1, $2, $3, $4, $5, 'signup', FALSE)`,
-          [name.trim(), normalizedEmail, passwordHash, otpCode, otpExpires]
+          `INSERT INTO users (name, email_encrypted, email_sha256, password_hash, otp_code, otp_expires, otp_type, email_verified)
+           VALUES ($1, $2, $3, $4, $5, $6, 'signup', FALSE)`,
+          [name.trim(), encryptText(normalizedEmail), emailHash, passwordHash, otpHash, otpExpires]
         );
         console.log(`  ✅ Created new user record`);
       }
@@ -196,16 +240,16 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     const normalizedOtp = otp.trim();
 
     console.log(`\n🔍 Verifying OTP for ${normalizedEmail} (type: ${type})`);
 
     // Find user with matching OTP
     const result = await query(
-      `SELECT id, name, email, password_hash, otp_code, otp_expires, otp_type, email_verified
-       FROM users WHERE email = $1 AND otp_code = $2 AND otp_type = $3`,
-      [normalizedEmail, normalizedOtp, type]
+      `SELECT ${userSelectColumns}
+       FROM users WHERE email_sha256 = $1 AND otp_type = $2`,
+      [hashLookupValue(normalizedEmail), type]
     );
 
     if (result.rows.length === 0) {
@@ -216,7 +260,16 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const user = result.rows[0];
+    const user = hydrateUserRow(result.rows[0]);
+    const isValidOtp = await verifyStoredOtp(user.otp_code, normalizedOtp);
+
+    if (!isValidOtp) {
+      console.log(`  ❌ Invalid OTP`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid OTP code',
+      });
+    }
 
     // Check if OTP expired
     if (new Date(user.otp_expires) < new Date()) {
@@ -278,12 +331,12 @@ const resendOTP = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     console.log(`\n🔄 Resending OTP to ${normalizedEmail} (type: ${type})`);
 
     // Check if user exists
-    const result = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+    const result = await query('SELECT id FROM users WHERE email_sha256 = $1', [hashLookupValue(normalizedEmail)]);
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -295,12 +348,13 @@ const resendOTP = async (req, res) => {
     const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    console.log(`  🔐 New OTP: ${otpCode}`);
+    const otpHash = await hashOtp(otpCode);
+    console.log('  🔐 Generated resend OTP');
 
     // Update OTP
     await query(
-      `UPDATE users SET otp_code = $1, otp_expires = $2, otp_type = $3 WHERE email = $4`,
-      [otpCode, otpExpires, type, normalizedEmail]
+      `UPDATE users SET otp_code = $1, otp_expires = $2, otp_type = $3 WHERE id = $4`,
+      [otpHash, otpExpires, type, result.rows[0].id]
     );
 
     // Send OTP email
@@ -344,12 +398,12 @@ const signin = async (req, res) => {
     }
 
     const { email, password } = req.body;
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     console.log(`\n🔐 Sign in attempt for: ${normalizedEmail}`);
 
     // Find user
-    const result = await query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
+    const result = await query(`SELECT ${userSelectColumns} FROM users WHERE email_sha256 = $1`, [hashLookupValue(normalizedEmail)]);
     if (result.rows.length === 0) {
       console.log(`  ❌ User not found`);
       return res.status(401).json({
@@ -358,7 +412,7 @@ const signin = async (req, res) => {
       });
     }
 
-    const user = result.rows[0];
+    const user = hydrateUserRow(result.rows[0]);
 
     // Check if email is verified
     if (!user.email_verified) {
@@ -453,17 +507,17 @@ const googleSignin = async (req, res) => {
       });
     }
 
-    const normalizedEmail = payload.email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(payload.email);
     const googleName = (payload.name || normalizedEmail.split('@')[0]).trim();
 
     let userResult = await query(
-      'SELECT id, name, email, role, email_verified FROM users WHERE email = $1',
-      [normalizedEmail]
+      `SELECT ${userSelectColumns} FROM users WHERE email_sha256 = $1`,
+      [hashLookupValue(normalizedEmail)]
     );
 
     let user;
     if (userResult.rows.length > 0) {
-      user = userResult.rows[0];
+      user = hydrateUserRow(userResult.rows[0]);
 
       if (!user.email_verified) {
         await query(
@@ -479,13 +533,13 @@ const googleSignin = async (req, res) => {
       const passwordHash = await bcrypt.hash(randomPassword, 10);
 
       const createdUser = await query(
-        `INSERT INTO users (name, email, password_hash, email_verified)
-         VALUES ($1, $2, $3, TRUE)
-         RETURNING id, name, email, role, email_verified`,
-        [googleName, normalizedEmail, passwordHash]
+        `INSERT INTO users (name, email_encrypted, email_sha256, password_hash, email_verified)
+         VALUES ($1, $2, $3, $4, TRUE)
+         RETURNING ${userSelectColumns}`,
+        [googleName, encryptText(normalizedEmail), hashLookupValue(normalizedEmail), passwordHash]
       );
 
-      user = createdUser.rows[0];
+      user = hydrateUserRow(createdUser.rows[0]);
     }
 
     const token = generateToken(user.id);
@@ -518,7 +572,7 @@ const googleSignin = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at
+      `SELECT ${userSelectColumns}
        FROM users
        WHERE id = $1`,
       [req.user.id]
@@ -531,19 +585,21 @@ const getMe = async (req, res) => {
       });
     }
 
+    const user = hydrateUserRow(result.rows[0]);
+
     res.json({
       success: true,
       user: {
-        id: result.rows[0].id,
-        name: result.rows[0].name,
-        email: result.rows[0].email,
-        role: result.rows[0].role,
-        bio: result.rows[0].bio,
-        country: result.rows[0].country,
-        githubUrl: result.rows[0].github_url,
-        preferredLanguage: result.rows[0].preferred_language,
-        emailVerified: result.rows[0].email_verified,
-        createdAt: result.rows[0].created_at,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        bio: user.bio,
+        country: user.country,
+        githubUrl: user.github_url,
+        preferredLanguage: user.preferred_language,
+        emailVerified: user.email_verified,
+        createdAt: user.created_at,
       },
     });
   } catch (error) {
@@ -558,7 +614,7 @@ const getMe = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const userResult = await query(
-      `SELECT id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at
+      `SELECT ${userSelectColumns}
        FROM users
        WHERE id = $1`,
       [req.user.id]
@@ -613,7 +669,7 @@ const getProfile = async (req, res) => {
       getUserRanks(req.user.id),
     ]);
 
-    const user = userResult.rows[0];
+    const user = hydrateUserRow(userResult.rows[0]);
 
     return res.json({
       success: true,
@@ -686,37 +742,42 @@ const updateProfile = async (req, res) => {
     const result = await query(
       `UPDATE users
        SET name = $1,
-           bio = $2,
-           country = $3,
-           github_url = $4,
+           bio = NULL,
+           bio_encrypted = $2,
+           country = NULL,
+           country_encrypted = $3,
+           github_url = NULL,
+           github_url_encrypted = $4,
            preferred_language = $5,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $6
-       RETURNING id, name, email, role, bio, country, github_url, preferred_language, email_verified, created_at`,
+       RETURNING ${userSelectColumns}`,
       [
         trimmedName,
-        trimmedBio || null,
-        trimmedCountry || null,
-        trimmedGithubUrl || null,
+        encryptText(trimmedBio || null),
+        encryptText(trimmedCountry || null),
+        encryptText(trimmedGithubUrl || null),
         trimmedPreferredLanguage || null,
         req.user.id,
       ]
     );
 
+    const user = hydrateUserRow(result.rows[0]);
+
     return res.json({
       success: true,
       message: 'Profile updated successfully',
       profile: {
-        id: result.rows[0].id,
-        name: result.rows[0].name,
-        email: result.rows[0].email,
-        role: result.rows[0].role,
-        bio: result.rows[0].bio || '',
-        country: result.rows[0].country || '',
-        githubUrl: result.rows[0].github_url || '',
-        preferredLanguage: result.rows[0].preferred_language || '',
-        emailVerified: result.rows[0].email_verified,
-        createdAt: result.rows[0].created_at,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        bio: user.bio || '',
+        country: user.country || '',
+        githubUrl: user.github_url || '',
+        preferredLanguage: user.preferred_language || '',
+        emailVerified: user.email_verified,
+        createdAt: user.created_at,
       },
     });
   } catch (error) {
@@ -743,10 +804,13 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     console.log(`\n🔐 Password reset requested for: ${normalizedEmail}`);
 
-    const result = await query('SELECT id FROM users WHERE email = $1 AND email_verified = TRUE', [normalizedEmail]);
+    const result = await query(
+      'SELECT id FROM users WHERE email_sha256 = $1 AND email_verified = TRUE',
+      [hashLookupValue(normalizedEmail)]
+    );
     if (result.rows.length === 0) {
       // Don't reveal if email exists for security
       console.log(`  ℹ️  Email not found or not verified`);
@@ -760,12 +824,13 @@ const forgotPassword = async (req, res) => {
     const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    console.log(`  🔐 Generated OTP: ${otpCode}`);
+    const otpHash = await hashOtp(otpCode);
+    console.log('  🔐 Generated password reset OTP');
 
     // Store OTP
     await query(
-      `UPDATE users SET otp_code = $1, otp_expires = $2, otp_type = 'forgot-password' WHERE email = $3`,
-      [otpCode, otpExpires, normalizedEmail]
+      `UPDATE users SET otp_code = $1, otp_expires = $2, otp_type = 'forgot-password' WHERE id = $3`,
+      [otpHash, otpExpires, result.rows[0].id]
     );
 
     // Send OTP email
@@ -822,18 +887,27 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     console.log(`\n🔐 Password reset for: ${normalizedEmail}`);
 
     // Verify OTP
     const result = await query(
-      `SELECT id FROM users 
-       WHERE email = $1 AND otp_code = $2 AND otp_type = 'forgot-password' AND otp_expires > NOW()`,
-      [normalizedEmail, otp]
+      `SELECT id, otp_code, otp_expires FROM users 
+       WHERE email_sha256 = $1 AND otp_type = 'forgot-password' AND otp_expires > NOW()`,
+      [hashLookupValue(normalizedEmail)]
     );
 
     if (result.rows.length === 0) {
+      console.log(`  ❌ Invalid or expired OTP`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired reset code'
+      });
+    }
+
+    const isValidOtp = await verifyStoredOtp(result.rows[0].otp_code, otp);
+    if (!isValidOtp) {
       console.log(`  ❌ Invalid or expired OTP`);
       return res.status(400).json({
         success: false,
@@ -884,7 +958,7 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     const normalizedOtp = otp.trim();
 
     console.log(`\n🔍 Verifying reset OTP for ${normalizedEmail}`);
@@ -892,8 +966,8 @@ const verifyResetOtp = async (req, res) => {
     // Find user with matching OTP
     const result = await query(
       `SELECT id, otp_code, otp_expires, otp_type
-       FROM users WHERE email = $1 AND otp_code = $2 AND otp_type = 'forgot-password'`,
-      [normalizedEmail, normalizedOtp]
+       FROM users WHERE email_sha256 = $1 AND otp_type = 'forgot-password'`,
+      [hashLookupValue(normalizedEmail)]
     );
 
     if (result.rows.length === 0) {
@@ -905,6 +979,15 @@ const verifyResetOtp = async (req, res) => {
     }
 
     const user = result.rows[0];
+    const isValidOtp = await verifyStoredOtp(user.otp_code, normalizedOtp);
+
+    if (!isValidOtp) {
+      console.log(`  ❌ Invalid OTP`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid OTP. Please try again.',
+      });
+    }
 
     // Check if OTP expired
     if (new Date(user.otp_expires) < new Date()) {

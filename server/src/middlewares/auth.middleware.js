@@ -4,6 +4,7 @@
  */
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/db');
+const { decryptText } = require('../utils/secureData');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -29,7 +30,7 @@ const authenticateToken = async (req, res, next) => {
     
     // Fetch user from database
     const result = await query(
-      'SELECT id, name, email, role, email_verified FROM users WHERE id = $1',
+      'SELECT id, name, email, email_encrypted, role, email_verified FROM users WHERE id = $1',
       [decoded.userId]
     );
     
@@ -41,7 +42,10 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // Attach user to request object
-    req.user = result.rows[0];
+    req.user = {
+      ...result.rows[0],
+      email: decryptText(result.rows[0].email_encrypted || result.rows[0].email),
+    };
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

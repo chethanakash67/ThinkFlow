@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, pool } = require('../src/config/db');
 const { getLeaderboard } = require('../services/gamificationService');
+const { decryptText, encryptText, hashLookupValue } = require('../src/utils/secureData');
 const {
   sendCompetitionApprovalRequest,
   sendCompetitionDecisionEmail,
@@ -67,7 +68,14 @@ const formatRequest = (request) => ({
   endTime: request.end_time,
   durationMinutes: request.duration_minutes,
   submittedAt: request.created_at,
-  organizationName: request.organization_name || '',
+  organizationName: decryptText(request.organization_name_encrypted || request.organization_name) || '',
+});
+
+const decryptCompetitionRequestFields = (request) => ({
+  ...request,
+  creator_email: decryptText(request.creator_email_encrypted || request.creator_email),
+  creator_phone: decryptText(request.creator_phone_encrypted || request.creator_phone),
+  organization_name: decryptText(request.organization_name_encrypted || request.organization_name),
 });
 
 const buildCompetitionDescription = (questions) => {
@@ -397,8 +405,12 @@ const createCompetitionRequest = async (req, res) => {
          creator_user_id,
          creator_name,
          creator_email,
+         creator_email_encrypted,
+         creator_email_sha256,
          creator_phone,
+         creator_phone_encrypted,
          organization_name,
+         organization_name_encrypted,
          competition_name,
          competition_date,
          start_time,
@@ -408,14 +420,15 @@ const createCompetitionRequest = async (req, res) => {
          approval_token,
          rejection_token
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, NULL, $3, $4, NULL, $5, NULL, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         req.user.id,
         req.user.name,
-        email.trim().toLowerCase(),
-        phone.trim(),
-        organizationName.trim() || null,
+        encryptText(email.trim().toLowerCase()),
+        hashLookupValue(email.trim().toLowerCase()),
+        encryptText(phone.trim()),
+        encryptText(organizationName.trim() || null),
         name.trim(),
         competitionDate,
         startTime,
@@ -539,7 +552,7 @@ const approveCompetitionRequest = async (req, res) => {
       return res.status(404).send('Approval request not found.');
     }
 
-    const request = requestResult.rows[0];
+    const request = decryptCompetitionRequestFields(requestResult.rows[0]);
     if (request.status !== 'pending_approval') {
       return res.status(400).send(`This request is already ${request.status}.`);
     }
@@ -765,7 +778,7 @@ const rejectCompetitionRequest = async (req, res) => {
       return res.status(404).send('Rejection request not found.');
     }
 
-    const request = requestResult.rows[0];
+    const request = decryptCompetitionRequestFields(requestResult.rows[0]);
     if (request.status !== 'pending_approval') {
       return res.status(400).send(`This request is already ${request.status}.`);
     }

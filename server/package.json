@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "lint": "node --check src/server.js && node --check src/controllers/auth.controller.js && node --check src/middlewares/auth.middleware.js && node --check src/config/db.js && node --check src/utils/secureData.js && node --check ../server/controllers/competitionController.js && node --check scripts/rotateEncryptionKey.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

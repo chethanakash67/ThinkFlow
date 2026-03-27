@@ -64,6 +64,55 @@ ThinkFlow is a web application that emphasizes logic-first coding. Users express
 - **bcrypt** - Password hashing
 - **express-validator** - Input validation
 
+## Server Encryption
+
+ThinkFlow now encrypts sensitive user data at rest on the backend.
+
+Encrypted at rest:
+- `users.email`
+- `users.bio`
+- `users.country`
+- `users.github_url`
+- competition request contact fields such as creator email, phone, and organization
+
+Lookup-safe hashing:
+- email lookups use a deterministic SHA-256 hash column such as `users.email_sha256`
+- this keeps login/signup/reset flows queryable without storing readable emails in plaintext
+
+How it works:
+- AES-256-GCM encryption and OTP hashing live in [server/src/utils/secureData.js](./server/src/utils/secureData.js)
+- encrypted values are stored in `*_encrypted` columns
+- plaintext source columns are nulled during migration after encrypted copies are verified
+- backup tables keep encrypted backups for migration safety
+
+Required env vars:
+- `FIELD_ENCRYPTION_KEY`
+- `JWT_SECRET`
+- database connection vars such as `DATABASE_URL` or `DB_*`
+
+Important:
+- all backend instances must share the exact same `FIELD_ENCRYPTION_KEY`
+- the server will refuse to boot if `FIELD_ENCRYPTION_KEY` or `APP_ENCRYPTION_KEY` is missing or too short
+- generate a strong local key with:
+
+```bash
+openssl rand -base64 32
+```
+
+Rotation:
+- use `server/scripts/rotateEncryptionKey.js`
+- run it with both keys present:
+
+```bash
+cd server
+OLD_FIELD_ENCRYPTION_KEY="old-key" NEW_FIELD_ENCRYPTION_KEY="new-key" node scripts/rotateEncryptionKey.js
+```
+
+Deployment notes:
+- set `FIELD_ENCRYPTION_KEY` in Render before deploying
+- deploy all server instances with the same key
+- never log or return the encryption key in responses
+
 ## Project Structure
 
 ```
@@ -136,6 +185,7 @@ Without the API key, the system will use basic fallback evaluation (less accurat
 
 3. **Configure environment variables:**
    - Copy `server/.env.example` to `server/.env` and update values
+   - Generate and set `FIELD_ENCRYPTION_KEY` with `openssl rand -base64 32`
    - **Add your GEMINI_API_KEY** (see GEMINI_SETUP.md)
    - Copy `client/.env.local.example` to `client/.env.local` and update values
 
