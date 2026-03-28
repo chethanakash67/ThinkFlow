@@ -83,6 +83,8 @@ const executeJavaScript = async (code, testCase, timeoutMs) => {
   const startTime = Date.now();
   
   try {
+    const functionNames = extractFunctionNames(code, 'javascript');
+
     // Create a sandboxed VM
     const vm = new VM({
       timeout: timeoutMs,
@@ -97,11 +99,39 @@ const executeJavaScript = async (code, testCase, timeoutMs) => {
     const wrappedCode = `
       ${code}
       
-      // Execute the function with test input
-      const testInput = ${JSON.stringify(testCase.input)};
-      const result = typeof solution === 'function' 
-        ? solution(testInput) 
-        : (typeof solve === 'function' ? solve(testInput) : null);
+      const __testInput = ${JSON.stringify(testCase.input)};
+      const __argValues = ${JSON.stringify(getInvocationArgs(testCase.input))};
+      const __candidateNames = ${JSON.stringify(functionNames)};
+
+      const __invoke = (fn) => {
+        if (typeof fn !== 'function') return { found: false, value: undefined };
+        if (__argValues.length > 1) return { found: true, value: fn(...__argValues) };
+        if (__argValues.length === 1) {
+          try {
+            return { found: true, value: fn(__argValues[0]) };
+          } catch (singleArgError) {
+            return { found: true, value: fn(__testInput) };
+          }
+        }
+        return { found: true, value: fn(__testInput) };
+      };
+
+      let __matched = false;
+      let __result;
+      for (const __name of __candidateNames) {
+        const __candidate = typeof globalThis[__name] === 'function' ? globalThis[__name] : null;
+        const __outcome = __invoke(__candidate);
+        if (__outcome.found) {
+          __matched = true;
+          __result = __outcome.value;
+          break;
+        }
+      }
+      if (!__matched) {
+        throw new Error('No runnable function found. Define solution(...) or solve(...).');
+      }
+
+      const result = __result;
       result;
     `;
 
@@ -111,7 +141,7 @@ const executeJavaScript = async (code, testCase, timeoutMs) => {
 
     // Compare output with expected
     const expected = testCase.output;
-    const passed = deepEqual(output, expected);
+    const passed = outputsMatch(output, expected);
 
     return {
       input: testCase.input,
@@ -148,16 +178,40 @@ const executePython = async (code, testCase, timeoutMs) => {
   const fileName = path.join(tempDir, 'solution.py');
   
   try {
+    const functionNames = extractFunctionNames(code, 'python');
     const wrappedCode = `
 import json
 import sys
 
 ${code}
 
+def __invoke(fn, test_input, arg_values):
+    if len(arg_values) > 1:
+        return fn(*arg_values)
+    if len(arg_values) == 1:
+        try:
+            return fn(arg_values[0])
+        except TypeError:
+            return fn(test_input)
+    return fn(test_input)
+
 if __name__ == "__main__":
-    test_input = ${JSON.stringify(JSON.stringify(testCase.input))}
-    input_data = json.loads(test_input)
-    result = solution(input_data) if 'solution' in dir() else solve(input_data)
+    test_input = json.loads(${JSON.stringify(JSON.stringify(testCase.input))})
+    arg_values = json.loads(${JSON.stringify(JSON.stringify(getInvocationArgs(testCase.input)))})
+    candidate_names = json.loads(${JSON.stringify(JSON.stringify(functionNames))})
+    result = None
+    matched = False
+
+    for name in candidate_names:
+        fn = globals().get(name)
+        if callable(fn):
+            result = __invoke(fn, test_input, arg_values)
+            matched = True
+            break
+
+    if not matched:
+        raise RuntimeError("No runnable function found. Define solution(...) or solve(...).")
+
     print(json.dumps(result))
 `;
     
@@ -198,28 +252,77 @@ const executeCpp = async (code, testCase, timeoutMs) => {
   const execFile = path.join(tempDir, 'solution');
   
   try {
+    const normalizedCode = normalizeCppSource(code);
     // Check if code already has main function
-    const hasMain = code.includes('int main');
+    const hasMain = normalizedCode.includes('int main');
+    const functionName = extractPrimaryFunctionName(normalizedCode, 'cpp');
+    const signature = extractCppFunctionSignature(normalizedCode, functionName);
     
     let finalCode;
     if (hasMain) {
       // User provided complete program - use as is
-      finalCode = code;
+      finalCode = normalizedCode;
     } else {
-      // Wrap user's function (simplified wrapper)
-      finalCode = `
-#include <iostream>
-#include <vector>
-#include <string>
+      if (!functionName) {
+        throw new Error('No C++ function found to execute. Define solution(...), solve(...), or a named helper function.');
+      }
 
+      const inputEntries = buildInputEntries(testCase.input);
+      const declarations = buildCppDeclarations(inputEntries);
+      const invocationArgs = signature?.parameterCount === 0
+        ? ''
+        : inputEntries.map(({ name }) => sanitizeIdentifier(name)).join(', ');
+
+      finalCode = `
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 using namespace std;
 
-${code}
+${normalizedCode}
+
+string __escapeString(const string& value) {
+    string out = "\\"";
+    for (char ch : value) {
+        if (ch == '\\\\' || ch == '\\"') out += '\\\\';
+        out += ch;
+    }
+    out += "\\"";
+    return out;
+}
+
+string __toJson(const string& value) { return __escapeString(value); }
+string __toJson(const char* value) { return __escapeString(string(value)); }
+string __toJson(char value) { return __escapeString(string(1, value)); }
+string __toJson(bool value) { return value ? "true" : "false"; }
+
+template <typename T>
+typename enable_if<is_arithmetic<T>::value && !is_same<T, bool>::value, string>::type
+__toJson(const T& value) { return to_string(value); }
+
+template <typename T>
+string __toJson(const vector<T>& values) {
+    string out = "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i) out += ",";
+        out += __toJson(values[i]);
+    }
+    out += "]";
+    return out;
+}
+
+template <typename A, typename B>
+string __toJson(const pair<A, B>& value) {
+    return "[" + __toJson(value.first) + "," + __toJson(value.second) + "]";
+}
 
 int main() {
-    // Call user's solution function
-    // Note: This is a basic wrapper, users should write complete programs for complex I/O
-    cout << solution() << endl;
+${declarations}
+    auto __result = ${functionName}(${invocationArgs});
+    cout << __toJson(__result);
     return 0;
 }
 `;
@@ -238,7 +341,8 @@ int main() {
     }
     
     // Execute
-    const result = await executeProcess(execFile, [], timeoutMs, testCase, false);
+    const stdinPayload = hasMain || signature?.parameterCount === 0 ? buildStdinPayload(testCase.input) : '';
+    const result = await executeProcess(execFile, [], timeoutMs, testCase, false, stdinPayload);
     
     // Cleanup
     await fs.unlink(sourceFile);
@@ -271,45 +375,106 @@ int main() {
  */
 const executeJava = async (code, testCase, timeoutMs) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'thinkflow-'));
-  const fileName = path.join(tempDir, 'Solution.java');
   
   try {
-    const wrappedCode = `
-import com.google.gson.Gson;
+    const hasMain = /\bpublic\s+static\s+void\s+main\s*\(/.test(code);
+    const declaredClassName = extractJavaClassName(code);
+    const functionName = extractPrimaryFunctionName(code, 'java');
+    const inputEntries = buildInputEntries(testCase.input);
+    const invocationArgs = inputEntries.map(({ name }) => sanitizeIdentifier(name)).join(', ');
+    const userClassName = declaredClassName || 'Solution';
+    const mainClassName = hasMain ? userClassName : 'Solution';
+    const sourceFile = path.join(tempDir, `${mainClassName}.java`);
 
-public class Solution {
-    ${code}
-    
+    let finalCode = code;
+    if (!hasMain) {
+      if (!functionName) {
+        throw new Error('No Java method found to execute. Define solution(...), solve(...), or a named helper method.');
+      }
+
+      const declarations = buildJavaDeclarations(inputEntries);
+      const classBody = declaredClassName
+        ? code
+        : `public class Solution {\n${code}\n}\n`;
+
+      finalCode = `
+import java.util.*;
+
+${classBody}
+
+class Runner {
+    private static String toJson(Object value) {
+        if (value == null) return "null";
+        if (value instanceof String) return "\\"" + ((String) value).replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"") + "\\"";
+        if (value instanceof Character) return "\\"" + value + "\\"";
+        if (value instanceof Boolean || value instanceof Number) return String.valueOf(value);
+        Class<?> cls = value.getClass();
+        if (cls.isArray()) {
+            int len = java.lang.reflect.Array.getLength(value);
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < len; i++) {
+                if (i > 0) sb.append(",");
+                sb.append(toJson(java.lang.reflect.Array.get(value, i)));
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+        if (value instanceof List<?>) {
+            List<?> list = (List<?>) value;
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(toJson(list.get(i)));
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+        if (value instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!first) sb.append(",");
+                first = false;
+                sb.append("\\"").append(String.valueOf(entry.getKey())).append("\\":");
+                sb.append(toJson(entry.getValue()));
+            }
+            sb.append("}");
+            return sb.toString();
+        }
+        return String.valueOf(value);
+    }
+
     public static void main(String[] args) {
-        Gson gson = new Gson();
-        String inputStr = "${JSON.stringify(testCase.input).replace(/"/g, '\\"')}";
-        Object input = gson.fromJson(inputStr, Object.class);
-        Object result = solution(input);
-        System.out.println(gson.toJson(result));
+${declarations}
+        Object result = ${userClassName}.${functionName}(${invocationArgs});
+        System.out.println(toJson(result));
     }
 }
 `;
+    }
+
+    await fs.writeFile(sourceFile, finalCode);
     
-    await fs.writeFile(fileName, wrappedCode);
+    const compileResult = await executeProcess('javac', [sourceFile], 10000, testCase, true);
+    if (compileResult.error) {
+      await fs.unlink(sourceFile);
+      await cleanupTempDir(tempDir);
+      return compileResult;
+    }
     
-    // Compile
-    await executeProcess('javac', [fileName], 10000, testCase);
+    const runClass = hasMain ? mainClassName : 'Runner';
+    const stdinPayload = hasMain ? buildStdinPayload(testCase.input) : '';
+    const result = await executeProcess('java', ['-cp', tempDir, runClass], timeoutMs, testCase, false, stdinPayload);
     
-    // Execute
-    const result = await executeProcess('java', ['-cp', tempDir, 'Solution'], timeoutMs, testCase);
-    
-    // Cleanup
-    await fs.unlink(fileName);
-    try { await fs.unlink(path.join(tempDir, 'Solution.class')); } catch {}
-    await fs.rmdir(tempDir);
+    await fs.unlink(sourceFile);
+    await cleanupTempDir(tempDir);
     
     return result;
   } catch (error) {
     // Cleanup on error
     try {
-      await fs.unlink(fileName);
-      try { await fs.unlink(path.join(tempDir, 'Solution.class')); } catch {}
-      await fs.rmdir(tempDir);
+      await cleanupTempDir(tempDir);
     } catch {}
     
     return {
@@ -335,13 +500,22 @@ const executeC = async (code, testCase, timeoutMs) => {
   try {
     // Check if code already has main function
     const hasMain = code.includes('int main');
+    const functionName = extractPrimaryFunctionName(code, 'c');
     
     let finalCode;
     if (hasMain) {
       // User provided complete program - use as is
       finalCode = code;
     } else {
-      // Wrap user's function in a main that handles I/O
+      if (!functionName) {
+        throw new Error('No C function found to execute. Define solution(...), solve(...), or write a full program with main().');
+      }
+
+      const signature = extractCFunctionSignature(code, functionName);
+      const inputEntries = buildInputEntries(testCase.input);
+      const declarations = buildCDeclarations(inputEntries);
+      const invocationArgs = buildCInvocationArgs(inputEntries, signature?.parameterCount || 0).join(', ');
+
       finalCode = `
 #include <stdio.h>
 #include <stdlib.h>
@@ -349,10 +523,22 @@ const executeC = async (code, testCase, timeoutMs) => {
 
 ${code}
 
+void __print_int_array(const int* arr, int len) {
+    printf("[");
+    for (int i = 0; i < len; i++) {
+        if (i > 0) printf(",");
+        printf("%d", arr[i]);
+    }
+    printf("]");
+}
+
 int main() {
-    // Parse input and call solution function
-    // This is a simplified wrapper - adjust based on your problem format
-    printf("{\\"result\\": %d}", solution(${JSON.stringify(testCase.input)}));
+${declarations}
+    int __result_len = 0;
+    int* __result_array = NULL;
+    int __result_scalar = 0;
+
+${buildCInvocationCode(functionName, inputEntries, signature?.returnType || '', signature?.parameterCount || 0)}
     return 0;
 }
 `;
@@ -371,7 +557,8 @@ int main() {
     }
     
     // Execute
-    const result = await executeProcess(execFile, [], timeoutMs, testCase, false);
+    const stdinPayload = hasMain ? buildStdinPayload(testCase.input) : '';
+    const result = await executeProcess(execFile, [], timeoutMs, testCase, false, stdinPayload);
     
     // Cleanup
     await fs.unlink(sourceFile);
@@ -402,7 +589,7 @@ int main() {
 /**
  * Execute a process and capture output
  */
-const executeProcess = (command, args, timeoutMs, testCase, isCompilation = false) => {
+const executeProcess = (command, args, timeoutMs, testCase, isCompilation = false, stdinData = '') => {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     
@@ -426,6 +613,11 @@ const executeProcess = (command, args, timeoutMs, testCase, isCompilation = fals
       process.stderr.on('data', (data) => {
         stderr += data.toString();
       });
+
+      if (stdinData) {
+        process.stdin.write(stdinData);
+      }
+      process.stdin.end();
       
       process.on('close', (code) => {
         clearTimeout(timeout);
@@ -466,8 +658,8 @@ const executeProcess = (command, args, timeoutMs, testCase, isCompilation = fals
       // For execution, try to parse output
       // If it's JSON, parse it; otherwise use raw output
       try {
-        const output = JSON.parse(stdout.trim());
-        const passed = deepEqual(output, testCase.output);
+        const output = parseExecutionOutput(stdout.trim());
+        const passed = outputsMatch(output, testCase.output);
         
         resolve({
           input: testCase.input,
@@ -481,7 +673,7 @@ const executeProcess = (command, args, timeoutMs, testCase, isCompilation = fals
       } catch (error) {
         // If JSON parsing fails, treat stdout as raw output
         const actualOutput = stdout.trim();
-        const passed = actualOutput === String(testCase.output);
+        const passed = outputsMatch(actualOutput, testCase.output);
         
         resolve({
           input: testCase.input,
@@ -537,6 +729,289 @@ const executeProcess = (command, args, timeoutMs, testCase, isCompilation = fals
  * @deprecated Use executeJavaScript instead
  */
 const executeSingleTestCase = executeJavaScript;
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const sanitizeIdentifier = (name) => String(name || 'inputData').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^\d/, '_$&');
+
+const buildInputEntries = (input) => {
+  if (isPlainObject(input)) {
+    return Object.entries(input).map(([name, value]) => ({ name, value }));
+  }
+
+  return [{ name: 'inputData', value: input }];
+};
+
+const getInvocationArgs = (input) => buildInputEntries(input).map(({ value }) => value);
+
+const extractFunctionNames = (code, language) => {
+  const names = [];
+  const addName = (name) => {
+    if (!name) return;
+    if (['if', 'for', 'while', 'switch', 'catch', 'main'].includes(name)) return;
+    if (!names.includes(name)) names.push(name);
+  };
+
+  const patterns = {
+    javascript: /function\s+([a-zA-Z_]\w*)\s*\(|(?:const|let|var)\s+([a-zA-Z_]\w*)\s*=\s*\([^)]*\)\s*=>/g,
+    python: /def\s+([a-zA-Z_]\w*)\s*\(/g,
+    cpp: /(?:^|\n)\s*(?:template\s*<[^>]+>\s*)?(?:[\w:<>,~*&\s]+)\s+([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*\{/g,
+    c: /(?:^|\n)\s*(?:[\w\s\*]+)\s+([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*\{/g,
+    java: /(?:public|private|protected)?\s*(?:static\s+)?[\w<>\[\]]+\s+([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*\{/g,
+  };
+
+  const pattern = patterns[language];
+  if (!pattern) return names;
+
+  let match;
+  while ((match = pattern.exec(code)) !== null) {
+    addName(match[1] || match[2]);
+  }
+
+  ['solution', 'solve', 'frequencySort', 'sortByFrequency'].forEach(addName);
+
+  return names;
+};
+
+const extractPrimaryFunctionName = (code, language) => extractFunctionNames(code, language)[0] || null;
+
+const escapeCppString = (value) =>
+  value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+
+const toCppLiteral = (value) => {
+  if (value === null || value === undefined) return 'nullptr';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '0';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') return `"${escapeCppString(value)}"`;
+  if (Array.isArray(value)) {
+    return `{${value.map(toCppLiteral).join(', ')}}`;
+  }
+  return '{}';
+};
+
+const inferCppType = (value) => {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return 'vector<int>';
+    return `vector<${inferCppType(value[0])}>`;
+  }
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'boolean') return 'bool';
+  if (Number.isInteger(value)) return 'int';
+  if (typeof value === 'number') return 'double';
+  return 'int';
+};
+
+const buildCppDeclarations = (entries) =>
+  entries
+    .map(({ name, value }) => `    ${inferCppType(value)} ${sanitizeIdentifier(name)} = ${toCppLiteral(value)};`)
+    .join('\n');
+
+const normalizeCppSource = (code) =>
+  code.replace(
+    /#include\s*<bits\/stdc\+\+\.h>/g,
+    [
+      '#include <algorithm>',
+      '#include <iostream>',
+      '#include <string>',
+      '#include <unordered_map>',
+      '#include <utility>',
+      '#include <vector>',
+    ].join('\n')
+  );
+
+const extractCppFunctionSignature = (code, functionName) => {
+  if (!functionName) return null;
+  const pattern = new RegExp(`([\\w:<>,~*&\\s]+?)\\s+${functionName}\\s*\\(([^)]*)\\)\\s*\\{`);
+  const match = code.match(pattern);
+  if (!match) return null;
+
+  const params = match[2].trim();
+  const parameterCount = !params || params === 'void' ? 0 : params.split(',').length;
+
+  return {
+    returnType: match[1].trim(),
+    parameterCount,
+  };
+};
+
+const toJavaLiteral = (value) => {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (Array.isArray(value)) {
+    const componentType = inferJavaType(value[0]);
+    return `new ${componentType.replace(/\[\]$/, '')}[]{${value.map(toJavaLiteral).join(', ')}}`;
+  }
+  return 'null';
+};
+
+const inferJavaType = (value) => {
+  if (Array.isArray(value)) {
+    const inner = value.length ? inferJavaType(value[0]) : 'int';
+    return `${inner}[]`;
+  }
+  if (typeof value === 'string') return 'String';
+  if (typeof value === 'boolean') return 'boolean';
+  if (Number.isInteger(value)) return 'int';
+  if (typeof value === 'number') return 'double';
+  return 'Object';
+};
+
+const buildJavaDeclarations = (entries) =>
+  entries
+    .map(({ name, value }) => `        ${inferJavaType(value)} ${sanitizeIdentifier(name)} = ${toJavaLiteral(value)};`)
+    .join('\n');
+
+const extractJavaClassName = (code) => {
+  const match = code.match(/\bclass\s+([A-Z][A-Za-z0-9_]*)\b/);
+  return match ? match[1] : null;
+};
+
+const inferCScalarType = (value) => {
+  if (typeof value === 'string') return 'char*';
+  return 'int';
+};
+
+const buildCDeclarations = (entries) =>
+  entries
+    .map(({ name, value }) => {
+      const safeName = sanitizeIdentifier(name);
+      if (Array.isArray(value)) {
+        const items = value.map((item) => (typeof item === 'number' ? String(item) : '0')).join(', ');
+        return `    int ${safeName}[] = {${items}};\n    int ${safeName}_len = ${value.length};`;
+      }
+      if (typeof value === 'string') {
+        return `    char ${safeName}[] = "${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}";`;
+      }
+      if (typeof value === 'boolean') {
+        return `    int ${safeName} = ${value ? 1 : 0};`;
+      }
+      return `    ${inferCScalarType(value)} ${safeName} = ${value ?? 0};`;
+    })
+    .join('\n');
+
+const extractCFunctionSignature = (code, functionName) => {
+  const pattern = new RegExp(`([\\w\\s\\*]+?)\\s+${functionName}\\s*\\(([^)]*)\\)\\s*\\{`);
+  const match = code.match(pattern);
+  if (!match) return null;
+
+  const params = match[2].trim();
+  const parameterCount = !params || params === 'void' ? 0 : params.split(',').length;
+
+  return {
+    returnType: match[1].trim(),
+    parameterCount,
+  };
+};
+
+const buildCInvocationArgs = (entries, parameterCount) => {
+  const args = [];
+
+  for (const { name, value } of entries) {
+    const safeName = sanitizeIdentifier(name);
+    if (Array.isArray(value)) {
+      args.push(safeName);
+      if (args.length < parameterCount) {
+        args.push(`${safeName}_len`);
+      }
+    } else {
+      args.push(safeName);
+    }
+  }
+
+  return args.slice(0, parameterCount);
+};
+
+const buildCInvocationCode = (functionName, entries, returnType, parameterCount) => {
+  const args = buildCInvocationArgs(entries, parameterCount).join(', ');
+
+  if (/\*/.test(returnType)) {
+    const arrayEntry = entries.find(({ value }) => Array.isArray(value));
+    const arrayLen = arrayEntry ? `${sanitizeIdentifier(arrayEntry.name)}_len` : '0';
+    return `    __result_array = ${functionName}(${args});\n    __result_len = ${arrayLen};\n    __print_int_array(__result_array, __result_len);\n`;
+  }
+
+  return `    __result_scalar = ${functionName}(${args});\n    printf("%d", __result_scalar);\n`;
+};
+
+const buildStdinPayload = (input) => {
+  const serialize = (value) => {
+    if (Array.isArray(value)) {
+      if (value.every((item) => !Array.isArray(item) && !isPlainObject(item))) {
+        return `${value.length}\n${value.join(' ')}\n`;
+      }
+
+      return `${value.length}\n${value.map((item) => serialize(item).trim()).join('\n')}\n`;
+    }
+
+    if (isPlainObject(value)) {
+      return Object.values(value).map(serialize).join('');
+    }
+
+    if (typeof value === 'string') return `${value}\n`;
+    if (typeof value === 'boolean') return `${value ? 1 : 0}\n`;
+    return `${value}\n`;
+  };
+
+  return serialize(input);
+};
+
+const parseExecutionOutput = (rawOutput) => {
+  if (!rawOutput) return '';
+
+  try {
+    return JSON.parse(rawOutput);
+  } catch {
+    const compact = rawOutput.trim();
+    if (/^\[.*\]$/.test(compact) || /^\{.*\}$/.test(compact)) {
+      try {
+        return JSON.parse(compact.replace(/'/g, '"'));
+      } catch {}
+    }
+
+    if (/^-?\d+(?:\s+-?\d+)+$/.test(compact)) {
+      return compact.split(/\s+/).map(Number);
+    }
+
+    const numberValue = Number(compact);
+    if (!Number.isNaN(numberValue) && compact !== '') {
+      return numberValue;
+    }
+
+    return compact;
+  }
+};
+
+const normalizeValue = (value) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      const numberValue = Number(trimmed);
+      return Number.isNaN(numberValue) ? trimmed : numberValue;
+    }
+  }
+
+  if (Array.isArray(value)) return value.map(normalizeValue);
+  if (isPlainObject(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizeValue(item)]));
+  }
+
+  return value;
+};
+
+const outputsMatch = (actual, expected) => deepEqual(normalizeValue(actual), normalizeValue(expected));
+
+const cleanupTempDir = async (tempDir) => {
+  await fs.rm(tempDir, { recursive: true, force: true });
+};
 
 /**
  * Deep equality check for comparing outputs
