@@ -70,6 +70,61 @@ const hydrateUserRow = (user) => ({
   github_url: decryptText(user.github_url_encrypted || user.github_url),
 });
 
+const buildActivitySummary = (rows = []) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const dayMap = new Map();
+  rows.forEach((row) => {
+    const key = row.activity_date instanceof Date
+      ? row.activity_date.toISOString().slice(0, 10)
+      : String(row.activity_date).slice(0, 10);
+    dayMap.set(key, parseInt(row.activity_count, 10) || 0);
+  });
+
+  let currentStreak = 0;
+  let maxStreak = 0;
+  let runningStreak = 0;
+
+  for (let offset = 364; offset >= 0; offset -= 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - offset);
+    const key = date.toISOString().slice(0, 10);
+    const count = dayMap.get(key) || 0;
+
+    if (count > 0) {
+      runningStreak += 1;
+      maxStreak = Math.max(maxStreak, runningStreak);
+    } else {
+      runningStreak = 0;
+    }
+  }
+
+  for (let offset = 0; offset < 365; offset += 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - offset);
+    const key = date.toISOString().slice(0, 10);
+    if ((dayMap.get(key) || 0) > 0) {
+      currentStreak += 1;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    calendar: rows.map((row) => ({
+      date: row.activity_date instanceof Date
+        ? row.activity_date.toISOString().slice(0, 10)
+        : String(row.activity_date).slice(0, 10),
+      count: parseInt(row.activity_count, 10) || 0,
+    })),
+    totalActiveDays: rows.length,
+    totalSubmissions: rows.reduce((sum, row) => sum + (parseInt(row.activity_count, 10) || 0), 0),
+    currentStreak,
+    maxStreak,
+  };
+};
+
 /**
  * User Signup - Step 1: Send OTP
  * POST /api/auth/signup
@@ -669,7 +724,27 @@ const getProfile = async (req, res) => {
       getUserRanks(req.user.id),
     ]);
 
+    const activityResult = await query(
+      `WITH combined_activity AS (
+         SELECT created_at
+         FROM logic_submissions
+         WHERE user_id = $1
+         UNION ALL
+         SELECT created_at
+         FROM code_submissions
+         WHERE user_id = $1
+       )
+       SELECT DATE(created_at) AS activity_date,
+              COUNT(*)::int AS activity_count
+       FROM combined_activity
+       WHERE created_at >= CURRENT_DATE - INTERVAL '364 days'
+       GROUP BY DATE(created_at)
+       ORDER BY activity_date ASC`,
+      [req.user.id]
+    );
+
     const user = hydrateUserRow(userResult.rows[0]);
+    const activity = buildActivitySummary(activityResult.rows);
 
     return res.json({
       success: true,
@@ -697,6 +772,7 @@ const getProfile = async (req, res) => {
         totalPoints: gamification.totalPoints,
         weeklyPoints: gamification.weeklyPoints,
       },
+      activity,
       rankings: ranks,
       badges: gamification.badges,
     });

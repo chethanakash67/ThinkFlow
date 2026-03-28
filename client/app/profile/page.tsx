@@ -1,7 +1,7 @@
 'use client';
 
 import './profile.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FaCodeBranch,
   FaGlobe,
@@ -34,6 +34,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null);
   const [metrics, setMetrics] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
+  const [activity, setActivity] = useState<any>(null);
   const [badges, setBadges] = useState<any[]>([]);
   const [rankings, setRankings] = useState<any>(null);
   const [form, setForm] = useState<ProfileForm>(emptyProfile);
@@ -47,6 +48,7 @@ export default function ProfilePage() {
         setProfile(response.data.profile);
         setMetrics(response.data.metrics);
         setStats(response.data.stats);
+        setActivity(response.data.activity || null);
         setBadges(response.data.badges || []);
         setRankings(response.data.rankings || null);
         setForm({
@@ -90,6 +92,56 @@ export default function ProfilePage() {
       day: 'numeric',
       year: 'numeric',
     });
+
+  const activityCalendar = useMemo(() => {
+    const entries = new Map<string, number>(
+      (activity?.calendar || []).map((entry: any) => [entry.date, entry.count])
+    );
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const days: Array<{ key: string; date: Date; count: number }> = [];
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 364);
+
+    for (let offset = 0; offset < 365; offset += 1) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + offset);
+      const key = date.toISOString().slice(0, 10);
+      days.push({
+        key,
+        date,
+        count: entries.get(key) || 0,
+      });
+    }
+
+    const paddedDays: Array<{ key: string; date: Date; count: number } | null> = [...days];
+    const leadingBlanks = startDate.getDay();
+    for (let index = 0; index < leadingBlanks; index += 1) {
+      paddedDays.unshift(null);
+    }
+
+    const weeks: Array<Array<{ key: string; date: Date; count: number } | null>> = [];
+    for (let index = 0; index < paddedDays.length; index += 7) {
+      weeks.push(paddedDays.slice(index, index + 7));
+    }
+
+    const monthLabels = weeks.map((week) => {
+      const firstDay = week.find(Boolean) as any;
+      if (!firstDay || firstDay.date.getDate() > 7) return '';
+      return firstDay.date.toLocaleDateString('en-US', { month: 'short' });
+    });
+
+    return { weeks, monthLabels };
+  }, [activity]);
+
+  const getActivityLevel = (count: number) => {
+    if (count >= 5) return 'level-4';
+    if (count >= 3) return 'level-3';
+    if (count >= 2) return 'level-2';
+    if (count >= 1) return 'level-1';
+    return 'level-0';
+  };
 
   return (
     <ProtectedRoute>
@@ -252,6 +304,47 @@ export default function ProfilePage() {
                         </div>
                       ))
                     )}
+                  </div>
+                </article>
+              </section>
+
+              <section className="profile-calendar-section">
+                <article className="app-panel-card profile-card profile-calendar-card">
+                  <div className="profile-card-head">
+                    <div>
+                      <p className="app-kicker">Activity</p>
+                      <h2>{activity?.totalSubmissions || 0} submissions in the past one year</h2>
+                    </div>
+                    <div className="profile-calendar-summary">
+                      <span>Total active days: <strong>{activity?.totalActiveDays || 0}</strong></span>
+                      <span>Current streak: <strong>{activity?.currentStreak || 0}</strong></span>
+                      <span>Max streak: <strong>{activity?.maxStreak || 0}</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="profile-calendar-board">
+                    <div className="profile-calendar-months">
+                      {activityCalendar.monthLabels.map((label, index) => (
+                        <span key={`${label}-${index}`}>{label}</span>
+                      ))}
+                    </div>
+                    <div className="profile-calendar-grid">
+                      {activityCalendar.weeks.map((week, weekIndex) => (
+                        <div key={`week-${weekIndex}`} className="profile-calendar-week">
+                          {week.map((day, dayIndex) => (
+                            day ? (
+                              <div
+                                key={day.key}
+                                className={`profile-calendar-cell ${getActivityLevel(day.count)}`}
+                                title={`${day.count} submissions on ${formatDate(day.key)}`}
+                              />
+                            ) : (
+                              <div key={`blank-${weekIndex}-${dayIndex}`} className="profile-calendar-cell empty" />
+                            )
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </article>
               </section>
