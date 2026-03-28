@@ -6,7 +6,7 @@ import axios from 'axios'
 import { FaPlus, FaTrash, FaCheck, FaEdit } from 'react-icons/fa'
 import { format } from 'date-fns'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://thinkflow-6t7n.onrender.com/api').replace(/\/api\/?$/, '')
 
 interface Task {
   id: number

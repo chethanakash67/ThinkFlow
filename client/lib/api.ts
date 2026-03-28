@@ -1,7 +1,7 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-// API URL: uses env var if set, otherwise points to Render production backend
+// API URL: use the Render deployment unless explicitly overridden
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://thinkflow-6t7n.onrender.com/api';
 
 console.log('API URL configured:', API_URL);
