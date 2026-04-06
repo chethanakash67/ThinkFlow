@@ -1,0 +1,19 @@
+{
+  "name": "thinkflow-judge-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-grade online judge services for ThinkFlow",
+  "scripts": {
+    "judge:api": "node api/src/server.js",
+    "judge:worker": "node worker/src/worker.js",
+    "judge:demo": "node scripts/demo-submit.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.8.4",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "pino": "^9.4.0",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.2"
+  }
+}

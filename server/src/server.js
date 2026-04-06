@@ -13,11 +13,12 @@ const { init: initDB, pool, runMigrations } = require('./config/db');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS Configuration - Allow Vercel frontend
+// CORS configuration for deployed frontends
 const allowedOrigins = [
   'http://localhost:3000',
   'https://think-flow-tau.vercel.app',
   'https://think-and-code-in-a-flow.vercel.app',
+  'https://thinkflow-6t7n.onrender.com',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 

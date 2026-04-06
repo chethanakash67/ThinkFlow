@@ -1,0 +1,57 @@
+[
+  {
+    "id": "sum-two-integers",
+    "title": "Sum Two Integers",
+    "checker": {
+      "type": "exact"
+    },
+    "limits": {
+      "cpuTimeMs": 1000,
+      "realTimeMs": 3000,
+      "memoryKb": 262144,
+      "fileSizeKb": 65536,
+      "outputLimitKb": 256,
+      "processCount": 16
+    },
+    "testcases": [
+      {
+        "id": "tc-1",
+        "stdin": "2 3\n",
+        "expectedOutput": "5\n"
+      },
+      {
+        "id": "tc-2",
+        "stdin": "-7 10\n",
+        "expectedOutput": "3\n"
+      }
+    ]
+  },
+  {
+    "id": "floating-average",
+    "title": "Floating Point Average",
+    "checker": {
+      "type": "custom",
+      "checkerFile": "floating_average_checker.py"
+    },
+    "limits": {
+      "cpuTimeMs": 1000,
+      "realTimeMs": 3000,
+      "memoryKb": 262144,
+      "fileSizeKb": 65536,
+      "outputLimitKb": 256,
+      "processCount": 16
+    },
+    "testcases": [
+      {
+        "id": "tc-1",
+        "stdin": "3\n1 2 2\n",
+        "expectedOutput": "1.6666667\n"
+      },
+      {
+        "id": "tc-2",
+        "stdin": "4\n1 1 1 2\n",
+        "expectedOutput": "1.25\n"
+      }
+    ]
+  }
+]

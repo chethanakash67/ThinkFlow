@@ -194,7 +194,7 @@ Without the API key, the system will use basic fallback evaluation (less accurat
 npm run dev
 ```
 
-5. **Visit http://localhost:3000**
+5. **Use the frontend locally at `http://localhost:3000` or point the frontend to your Render backend with `NEXT_PUBLIC_API_URL`**
 
 ## API Endpoints
 
@@ -275,6 +275,23 @@ npm start
 # Run backend
 cd server
 npm start
+```
+
+## Judge Platform
+
+A production-oriented online judge demo is available in [server/judge/README.md](./server/judge/README.md).
+
+It includes:
+- a separate submission API
+- Redis + BullMQ queueing
+- isolate-based sandbox workers
+- multi-language compile/run support for C, C++, Java, Python, and JavaScript
+- exact, trimmed, and custom checker modes
+
+Run it locally with:
+
+```bash
+docker compose up --build redis judge-api judge-worker
 ```
 
 ## Database Schema

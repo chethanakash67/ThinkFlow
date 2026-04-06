@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - judge-redis-data:/data
+
+  judge-api:
+    build:
+      context: ./server/judge
+      dockerfile: docker/api.Dockerfile
+    environment:
+      JUDGE_REDIS_URL: redis://redis:6379
+      JUDGE_API_PORT: 4010
+      JUDGE_SERVICE_NAME: judge-api
+    depends_on:
+      - redis
+    ports:
+      - "4010:4010"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+
+  judge-worker:
+    build:
+      context: ./server/judge
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      JUDGE_REDIS_URL: redis://redis:6379
+      JUDGE_WORKER_CONCURRENCY: 2
+      JUDGE_WORKDIR: /tmp/judge-work
+      JUDGE_SERVICE_NAME: judge-worker
+    depends_on:
+      - redis
+    tmpfs:
+      - /tmp:size=256m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - SYS_RESOURCE
+
+volumes:
+  judge-redis-data:

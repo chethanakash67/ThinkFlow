@@ -12,6 +12,9 @@ import './problem-detail.css'
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
+const DEFAULT_CUSTOM_INPUT = '{\n  "nums": [2, 7, 11, 15],\n  "target": 9\n}'
+const DEFAULT_CUSTOM_EXPECTED = '[0, 1]'
+
 interface LogicStep {
   step_number: number
   description: string
@@ -52,13 +55,15 @@ export default function ProblemDetailPage() {
   const [logicHistory, setLogicHistory] = useState<any[]>([])
   const [codeHistory, setCodeHistory] = useState<any[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
-  const [customInputText, setCustomInputText] = useState('{\n  "nums": [2, 7, 11, 15],\n  "target": 9\n}')
-  const [customExpectedText, setCustomExpectedText] = useState('[0, 1]')
+  const [customInputText, setCustomInputText] = useState(DEFAULT_CUSTOM_INPUT)
+  const [customExpectedText, setCustomExpectedText] = useState(DEFAULT_CUSTOM_EXPECTED)
   const [customRunResult, setCustomRunResult] = useState<any>(null)
   const [runningCustomTest, setRunningCustomTest] = useState(false)
   const [draftSavedAt, setDraftSavedAt] = useState<string>('')
   const completionProviderRef = useRef<any>(null)
   const draftLoadedRef = useRef(false)
+  const customInputEditedRef = useRef(false)
+  const customExpectedEditedRef = useRef(false)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -75,6 +80,10 @@ export default function ProblemDetailPage() {
   useEffect(() => {
     draftLoadedRef.current = false
     setDraftSavedAt('')
+    customInputEditedRef.current = false
+    customExpectedEditedRef.current = false
+    setCustomInputText(DEFAULT_CUSTOM_INPUT)
+    setCustomExpectedText(DEFAULT_CUSTOM_EXPECTED)
   }, [problemId])
 
   useEffect(() => {
@@ -141,6 +150,21 @@ export default function ProblemDetailPage() {
     const nextHints = buildEditorHints(problem, language)
     setEditorHints(nextHints)
   }, [problem, language])
+
+  useEffect(() => {
+    if (!problem) return
+
+    const fallbackInput = problem?.examples?.[0]?.input ?? problem?.test_cases?.[0]?.input
+    const fallbackOutput = problem?.examples?.[0]?.output ?? problem?.expected_outputs?.[0]?.output
+
+    if (fallbackInput !== undefined && !customInputEditedRef.current) {
+      setCustomInputText(JSON.stringify(fallbackInput, null, 2))
+    }
+
+    if (fallbackOutput !== undefined && !customExpectedEditedRef.current) {
+      setCustomExpectedText(JSON.stringify(fallbackOutput, null, 2))
+    }
+  }, [problem])
 
   useEffect(() => {
     if (!editorInstance) return
@@ -1046,7 +1070,10 @@ export default function ProblemDetailPage() {
                       <textarea
                         className="custom-test-textarea"
                         value={customInputText}
-                        onChange={(e) => setCustomInputText(e.target.value)}
+                        onChange={(e) => {
+                          customInputEditedRef.current = true
+                          setCustomInputText(e.target.value)
+                        }}
                       />
                     </div>
                     <div className="custom-test-col">
@@ -1054,7 +1081,10 @@ export default function ProblemDetailPage() {
                       <textarea
                         className="custom-test-textarea"
                         value={customExpectedText}
-                        onChange={(e) => setCustomExpectedText(e.target.value)}
+                        onChange={(e) => {
+                          customExpectedEditedRef.current = true
+                          setCustomExpectedText(e.target.value)
+                        }}
                       />
                     </div>
                   </div>
