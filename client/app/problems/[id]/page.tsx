@@ -10,7 +10,14 @@ import { FaSignOutAlt, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaAr
 import dynamic from 'next/dynamic'
 import './problem-detail.css'
 
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
+const Editor = dynamic(() => import('@monaco-editor/react'), {
+  ssr: false,
+  loading: () => (
+    <div className="editor-loading-state">
+      Loading compiler...
+    </div>
+  )
+})
 
 const DEFAULT_CUSTOM_INPUT = '{\n  "nums": [2, 7, 11, 15],\n  "target": 9\n}'
 const DEFAULT_CUSTOM_EXPECTED = '[0, 1]'
@@ -43,7 +50,7 @@ export default function ProblemDetailPage() {
   const [executionSteps, setExecutionSteps] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [showCodeEditor, setShowCodeEditor] = useState(isCompetitionMode)
+  const [showCodeEditor, setShowCodeEditor] = useState(true)
   const [user, setUser] = useState<any>(null)
   const [aiSuggestion, setAiSuggestion] = useState('')
   const [loadingSuggestion, setLoadingSuggestion] = useState(false)
