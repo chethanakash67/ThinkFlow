@@ -28,6 +28,20 @@ interface LogicStep {
   type?: string
 }
 
+interface ExecutionTraceStep {
+  id?: number
+  stepNumber: number
+  stage: string
+  stepDescription: string
+  variablesState: Record<string, any>
+  conditionResult?: boolean | null
+  flowAction?: string | null
+  iteration?: number | null
+  systemOutput?: any
+  purpose?: string | null
+  sourceStep?: number | null
+}
+
 interface EditorHint {
   title: string
   description: string
@@ -47,7 +61,8 @@ export default function ProblemDetailPage() {
   const [language, setLanguage] = useState('javascript')
   const [submission, setSubmission] = useState<any>(null)
   const [codeSubmission, setCodeSubmission] = useState<any>(null)
-  const [executionSteps, setExecutionSteps] = useState<any[]>([])
+  const [executionSteps, setExecutionSteps] = useState<ExecutionTraceStep[]>([])
+  const [currentExecutionIndex, setCurrentExecutionIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showCodeEditor, setShowCodeEditor] = useState(true)
@@ -381,6 +396,60 @@ export default function ProblemDetailPage() {
     setLogicSteps(updated)
   }
 
+  const formatTraceValue = (value: any) => {
+    if (value === null) return 'null'
+    if (value === undefined) return '—'
+    if (typeof value === 'string') return value
+
+    try {
+      return JSON.stringify(value)
+    } catch (error) {
+      return String(value)
+    }
+  }
+
+  const summarizeTraceState = (step: ExecutionTraceStep) => {
+    const detailParts = []
+    const entries = Object.entries(step.variablesState || {}).filter(([key]) => (
+      !['stage', 'flowAction', 'iteration', 'systemOutput', 'purpose', 'sourceStep'].includes(key)
+    ))
+
+    if (entries.length > 0) {
+      detailParts.push(entries.map(([key, value]) => `${key} = ${formatTraceValue(value)}`).join(', '))
+    }
+
+    if (step.conditionResult !== null && step.conditionResult !== undefined) {
+      detailParts.push(`Condition: ${step.conditionResult ? 'TRUE' : 'FALSE'}`)
+    }
+
+    if (step.flowAction) {
+      detailParts.push(step.flowAction)
+    }
+
+    if (step.systemOutput !== undefined && step.systemOutput !== null) {
+      detailParts.push(`Output: ${formatTraceValue(step.systemOutput)}`)
+    }
+
+    return detailParts.length > 0 ? detailParts.join(' | ') : 'State recorded for this step'
+  }
+
+  const getExecutionOverviewRows = () => {
+    const seen = new Set<string>()
+
+    return executionSteps
+      .filter((step) => {
+        if (!step.stage || seen.has(step.stage)) return false
+        seen.add(step.stage)
+        return true
+      })
+      .map((step) => ({
+        stage: step.stage,
+        whatHappens: step.stepDescription,
+        systemDisplay: summarizeTraceState(step),
+        purpose: step.purpose || 'Help the learner understand how the logic progresses.'
+      }))
+  }
+
   const handleSubmitLogic = async () => {
     if (logicSteps.some(step => !step.description.trim())) {
       alert('Please fill in all logic steps')
@@ -395,6 +464,7 @@ export default function ProblemDetailPage() {
       })
       setSubmission(response.data.submission)
       setExecutionSteps(response.data.executionSteps || [])
+      setCurrentExecutionIndex(0)
       fetchSubmissionHistory()
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to submit logic')
@@ -740,6 +810,9 @@ export default function ProblemDetailPage() {
     logout()
     router.push('/login')
   }
+
+  const currentExecutionStep = executionSteps[currentExecutionIndex] || null
+  const executionOverviewRows = getExecutionOverviewRows()
 
   return (
     <ProtectedRoute>
@@ -1352,21 +1425,136 @@ export default function ProblemDetailPage() {
             )}
 
             {!isCompetitionMode && executionSteps.length > 0 && (
-              <div className="execution-steps">
-                <h3 className="problem-section-title">Step-by-Step Execution</h3>
-                {executionSteps.map((step, index) => (
-                  <div key={index} className="execution-step">
-                    <div className="execution-step-number">Step {step.stepNumber}</div>
-                    <div className="execution-step-content">
-                      <div>{step.stepDescription}</div>
-                      {step.variablesState && Object.keys(step.variablesState).length > 0 && (
-                        <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
-                          Variables: {JSON.stringify(step.variablesState)}
+              <div className="execution-trace-panel">
+                <div className="execution-trace-header">
+                  <div>
+                    <h3 className="problem-section-title">Execution Trace</h3>
+                    <p className="execution-trace-subtitle">
+                      A sample run of your structured logic showing stages, variable state, conditions, and control flow.
+                    </p>
+                  </div>
+                  <div className="execution-trace-badge">
+                    {executionSteps.length} trace steps
+                  </div>
+                </div>
+
+                <div className="execution-trace-table-card">
+                  <div className="execution-trace-card-title">Execution Trace Breakdown</div>
+                  <div className="execution-trace-table-scroll">
+                    <table className="execution-trace-table">
+                      <thead>
+                        <tr>
+                          <th>Stage</th>
+                          <th>What Happens</th>
+                          <th>System Display</th>
+                          <th>Purpose</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {executionOverviewRows.map((row) => (
+                          <tr key={row.stage}>
+                            <td>{row.stage}</td>
+                            <td>{row.whatHappens}</td>
+                            <td>{row.systemDisplay}</td>
+                            <td>{row.purpose}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="execution-trace-table-card">
+                  <div className="execution-trace-card-title">Sample Execution Trace</div>
+                  <div className="execution-trace-table-scroll">
+                    <table className="execution-trace-table">
+                      <thead>
+                        <tr>
+                          <th>Step</th>
+                          <th>Stage</th>
+                          <th>Action</th>
+                          <th>Variable State / Result</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {executionSteps.map((step) => (
+                          <tr
+                            key={`${step.stepNumber}-${step.stage}`}
+                            className={currentExecutionStep?.stepNumber === step.stepNumber ? 'active' : ''}
+                            onClick={() => setCurrentExecutionIndex(Math.max(0, step.stepNumber - 1))}
+                          >
+                            <td>{step.stepNumber}</td>
+                            <td>{step.stage}</td>
+                            <td>{step.stepDescription}</td>
+                            <td>{summarizeTraceState(step)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {currentExecutionStep && (
+                  <div className="execution-trace-navigator">
+                    <div className="execution-trace-nav-controls">
+                      <button
+                        type="button"
+                        className="execution-nav-btn"
+                        onClick={() => setCurrentExecutionIndex((prev) => Math.max(prev - 1, 0))}
+                        disabled={currentExecutionIndex === 0}
+                      >
+                        Previous
+                      </button>
+                      <div className="execution-trace-nav-status">
+                        Viewing step {currentExecutionIndex + 1} of {executionSteps.length}
+                      </div>
+                      <button
+                        type="button"
+                        className="execution-nav-btn"
+                        onClick={() => setCurrentExecutionIndex((prev) => Math.min(prev + 1, executionSteps.length - 1))}
+                        disabled={currentExecutionIndex === executionSteps.length - 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+
+                    <div className="execution-trace-focus-card">
+                      <div className="execution-trace-focus-step">
+                        Step {currentExecutionStep.stepNumber}
+                      </div>
+                      <div className="execution-trace-focus-stage">
+                        {currentExecutionStep.stage}
+                      </div>
+                      <div className="execution-trace-focus-copy">
+                        {currentExecutionStep.stepDescription}
+                      </div>
+                      <div className="execution-trace-focus-grid">
+                        <div className="execution-trace-focus-box">
+                          <span>Variables</span>
+                          <code>{formatTraceValue(
+                            Object.fromEntries(
+                              Object.entries(currentExecutionStep.variablesState || {}).filter(([key]) => (
+                                !['stage', 'flowAction', 'iteration', 'systemOutput', 'purpose', 'sourceStep'].includes(key)
+                              ))
+                            )
+                          )}</code>
                         </div>
-                      )}
+                        <div className="execution-trace-focus-box">
+                          <span>Condition / Flow</span>
+                          <code>
+                            {currentExecutionStep.conditionResult !== null && currentExecutionStep.conditionResult !== undefined
+                              ? currentExecutionStep.conditionResult ? 'TRUE' : 'FALSE'
+                              : currentExecutionStep.flowAction || '—'}
+                          </code>
+                        </div>
+                        <div className="execution-trace-focus-box">
+                          <span>Output</span>
+                          <code>{formatTraceValue(currentExecutionStep.systemOutput)}</code>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             )}
 

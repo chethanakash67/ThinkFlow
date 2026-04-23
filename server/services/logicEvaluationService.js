@@ -136,13 +136,65 @@ const getExpectedApproach = (problem) => {
 - At each element, decide to extend current subarray or start new
 - Update maximum when current exceeds it`;
   }
+
+  if (title.includes('frequency') && title.includes('value')) {
+    return `- Count the frequency of each number using a map or dictionary
+- Sort the numbers by increasing frequency
+- If two numbers have the same frequency, sort them by value
+- Return the reordered array after applying both rules`;
+  }
   
   return `Analyze the problem requirements and design an efficient algorithm to solve it.`;
 };
 
+const getProblemConcepts = (problem) => {
+  const title = problem.title?.toLowerCase() || '';
+  const description = problem.description?.toLowerCase() || '';
+
+  if (title.includes('frequency') && title.includes('value')) {
+    return [
+      ['frequency', 'count'],
+      ['map', 'dictionary', 'hash map'],
+      ['sort', 'sorted', 'reorder'],
+      ['same frequency', 'equal frequency'],
+      ['value', 'number'],
+    ];
+  }
+
+  if (title.includes('two sum')) {
+    return [
+      ['hash map', 'map', 'dictionary'],
+      ['target', 'complement'],
+      ['index', 'indices'],
+    ];
+  }
+
+  if (title.includes('palindrome')) {
+    return [
+      ['two pointer', 'left', 'right'],
+      ['compare'],
+      ['match', 'mismatch'],
+    ];
+  }
+
+  if (title.includes('merge') && title.includes('interval')) {
+    return [
+      ['sort', 'sorted'],
+      ['overlap', 'merge'],
+      ['result', 'interval'],
+    ];
+  }
+
+  if (description.includes('sort')) {
+    return [['sort', 'sorted', 'reorder']];
+  }
+
+  return [];
+};
+
 const fallbackEvaluation = (logicSteps, problem) => {
   // Basic fallback evaluation when AI is not available
-  const analysis = analyzeLogicSteps(logicSteps, problem.test_cases, problem.expected_outputs);
+  const analysis = analyzeLogicSteps(logicSteps, problem.test_cases, problem.expected_outputs, problem);
   const feedback = generateFeedback(analysis, problem);
   const score = calculateScore(analysis, problem.test_cases.length);
   
@@ -166,7 +218,7 @@ const fallbackEvaluation = (logicSteps, problem) => {
   };
 };
 
-const analyzeLogicSteps = (logicSteps, testCases, expectedOutputs) => {
+const analyzeLogicSteps = (logicSteps, testCases, expectedOutputs, problem = {}) => {
   const analysis = {
     coveredTestCases: 0,
     missingSteps: [],
@@ -174,14 +226,11 @@ const analyzeLogicSteps = (logicSteps, testCases, expectedOutputs) => {
     edgeCasesHandled: false,
   };
 
+  const logicText = JSON.stringify(logicSteps).toLowerCase();
+
   // Check if logic covers all test cases
   for (let i = 0; i < testCases.length; i++) {
     const testCase = testCases[i];
-    const expected = expectedOutputs[i];
-    
-    // Simple heuristic: check if logic mentions key elements from test case
-    const logicText = JSON.stringify(logicSteps).toLowerCase();
-    const testCaseText = JSON.stringify(testCase).toLowerCase();
     
     // Extract key variables/values from test case
     const keyElements = extractKeyElements(testCase);
@@ -196,6 +245,22 @@ const analyzeLogicSteps = (logicSteps, testCases, expectedOutputs) => {
     
     if (covered) {
       analysis.coveredTestCases++;
+    }
+  }
+
+  const conceptGroups = getProblemConcepts(problem);
+
+  if (conceptGroups.length > 0) {
+    const matchedConceptGroups = conceptGroups.filter((group) =>
+      group.some((term) => logicText.includes(term))
+    ).length;
+
+    if (matchedConceptGroups > 0) {
+      const conceptCoverage = Math.round((matchedConceptGroups / conceptGroups.length) * Math.max(testCases.length, 1));
+      analysis.coveredTestCases = Math.max(
+        analysis.coveredTestCases,
+        Math.min(testCases.length, conceptCoverage)
+      );
     }
   }
 
@@ -312,20 +377,359 @@ const calculateScore = (analysis, totalTestCases) => {
   return Math.round(Math.min(100, Math.max(0, score)));
 };
 
-const generateExecutionSteps = (logicSteps, testCase) => {
+const TRACE_PURPOSES = {
+  'Input Initialization': 'Start execution with known sample input values and initial variable state.',
+  'Step Execution': 'Show how each logic instruction changes the current state.',
+  'Condition Evaluation': 'Reveal the exact decision being checked and whether it is true or false.',
+  'Control Flow Movement': 'Explain which branch or path execution follows next.',
+  'Iteration Handling': 'Break repeated execution into individual loop iterations.',
+  'Final Output Generation': 'Show the final state and learner-visible output.'
+};
+
+const cloneValue = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return JSON.parse(JSON.stringify(value));
+};
+
+const toTraceVariables = (testCase) => {
+  if (testCase && typeof testCase === 'object' && !Array.isArray(testCase)) {
+    if (testCase.input !== undefined) {
+      if (testCase.input && typeof testCase.input === 'object' && !Array.isArray(testCase.input)) {
+        return cloneValue(testCase.input);
+      }
+      return { input: cloneValue(testCase.input) };
+    }
+    return cloneValue(testCase);
+  }
+
+  return testCase === undefined ? {} : { input: cloneValue(testCase) };
+};
+
+const inferStage = (stepType, description) => {
+  const normalizedType = String(stepType || '').toLowerCase();
+  const normalizedDescription = String(description || '').toLowerCase();
+
+  if (normalizedType === 'input' || normalizedDescription.includes('input')) {
+    return 'Input Initialization';
+  }
+
+  if (normalizedType === 'output' || normalizedDescription.includes('print') || normalizedDescription.includes('return')) {
+    return 'Final Output Generation';
+  }
+
+  if (normalizedType === 'condition' || normalizedDescription.includes('if ') || normalizedDescription.startsWith('if(') || normalizedDescription.includes('else')) {
+    return 'Condition Evaluation';
+  }
+
+  if (normalizedType === 'loop' || normalizedDescription.includes('for ') || normalizedDescription.includes('while ') || normalizedDescription.includes('iterate') || normalizedDescription.includes('loop')) {
+    return 'Iteration Handling';
+  }
+
+  return 'Step Execution';
+};
+
+const parseLiteral = (rawValue, variables) => {
+  const trimmed = String(rawValue || '').trim().replace(/[),.]$/, '');
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (/^(true|false)$/i.test(trimmed)) {
+    return trimmed.toLowerCase() === 'true';
+  }
+
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith('\'') && trimmed.endsWith('\''))) {
+    return trimmed.slice(1, -1);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(variables, trimmed)) {
+    return cloneValue(variables[trimmed]);
+  }
+
+  return undefined;
+};
+
+const parseAssignmentsFromText = (description, variables) => {
+  const assignments = [];
+  const matches = String(description || '').matchAll(/\b([a-zA-Z_]\w*)\s*=\s*([^,;\n]+)/g);
+
+  for (const match of matches) {
+    const variableName = match[1];
+    const rawExpression = match[2].trim();
+    let nextValue = parseLiteral(rawExpression, variables);
+
+    if (nextValue === undefined) {
+      const mathMatch = rawExpression.match(/^([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*|-?\d+(?:\.\d+)?)$/);
+      if (mathMatch) {
+        const leftValue = parseLiteral(mathMatch[1], variables);
+        const rightValue = parseLiteral(mathMatch[3], variables);
+        const operator = mathMatch[2];
+
+        if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+          if (operator === '+') nextValue = leftValue + rightValue;
+          if (operator === '-') nextValue = leftValue - rightValue;
+          if (operator === '*') nextValue = leftValue * rightValue;
+          if (operator === '/' && rightValue !== 0) nextValue = leftValue / rightValue;
+        }
+      }
+    }
+
+    if (nextValue !== undefined) {
+      assignments.push({
+        variable: variableName,
+        value: nextValue,
+      });
+    }
+  }
+
+  return assignments;
+};
+
+const extractConditionExpression = (description) => {
+  const text = String(description || '').trim();
+  const ifMatch = text.match(/\bif\s*\(([^)]+)\)|\bif\b\s+(.+)/i);
+  if (ifMatch) {
+    return (ifMatch[1] || ifMatch[2] || '').trim().replace(/[.:]$/, '');
+  }
+
+  const whileMatch = text.match(/\bwhile\s*\(([^)]+)\)|\bwhile\b\s+(.+)/i);
+  if (whileMatch) {
+    return (whileMatch[1] || whileMatch[2] || '').trim().replace(/[.:]$/, '');
+  }
+
+  return '';
+};
+
+const evaluateSimpleCondition = (expression, variables) => {
+  const cleaned = String(expression || '').trim();
+  if (!cleaned) {
+    return null;
+  }
+
+  const comparisonMatch = cleaned.match(/^([a-zA-Z_]\w*|-?\d+(?:\.\d+)?|true|false|"[^"]*"|'[^']*')\s*(===|==|!==|!=|>=|<=|>|<)\s*([a-zA-Z_]\w*|-?\d+(?:\.\d+)?|true|false|"[^"]*"|'[^']*')$/);
+  if (!comparisonMatch) {
+    return null;
+  }
+
+  const leftValue = parseLiteral(comparisonMatch[1], variables);
+  const rightValue = parseLiteral(comparisonMatch[3], variables);
+  const operator = comparisonMatch[2];
+
+  if (leftValue === undefined || rightValue === undefined) {
+    return null;
+  }
+
+  switch (operator) {
+    case '>':
+      return leftValue > rightValue;
+    case '<':
+      return leftValue < rightValue;
+    case '>=':
+      return leftValue >= rightValue;
+    case '<=':
+      return leftValue <= rightValue;
+    case '==':
+      return leftValue == rightValue; // eslint-disable-line eqeqeq
+    case '===':
+      return leftValue === rightValue;
+    case '!=':
+      return leftValue != rightValue; // eslint-disable-line eqeqeq
+    case '!==':
+      return leftValue !== rightValue;
+    default:
+      return null;
+  }
+};
+
+const parseLoopDefinition = (description, variables) => {
+  const text = String(description || '').trim();
+  const forMatch = text.match(/\bfor\s+([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*|-?\d+(?:\.\d+)?)\s+to\s+([a-zA-Z_]\w*|-?\d+(?:\.\d+)?)/i);
+  if (!forMatch) {
+    return null;
+  }
+
+  const loopVariable = forMatch[1];
+  const start = parseLiteral(forMatch[2], variables);
+  const end = parseLiteral(forMatch[3], variables);
+
+  if (typeof start !== 'number' || typeof end !== 'number') {
+    return null;
+  }
+
+  return {
+    loopVariable,
+    start,
+    end,
+    iterations: Math.max(0, Math.min(Math.abs(end - start) + 1, 8)),
+    direction: start <= end ? 1 : -1,
+  };
+};
+
+const createTraceStep = ({
+  stepNumber,
+  stage,
+  stepDescription,
+  variablesState,
+  conditionResult = null,
+  flowAction = null,
+  iteration = null,
+  systemOutput = null,
+  purpose = TRACE_PURPOSES[stage],
+  sourceStep = null,
+}) => ({
+  stepNumber,
+  stage,
+  stepDescription,
+  variablesState: cloneValue(variablesState || {}),
+  conditionResult,
+  flowAction,
+  iteration,
+  systemOutput,
+  purpose,
+  sourceStep,
+});
+
+const generateExecutionSteps = (logicSteps, testCase, problem = null) => {
   const executionSteps = [];
-  
+  const variables = toTraceVariables(testCase);
+  const sampleInput = testCase?.input !== undefined ? cloneValue(testCase.input) : cloneValue(testCase);
+  const sampleOutput = problem?.expected_outputs?.[0]?.output ?? testCase?.output ?? null;
+  let traceStepNumber = 1;
+
+  executionSteps.push(createTraceStep({
+    stepNumber: traceStepNumber++,
+    stage: 'Input Initialization',
+    stepDescription: 'Sample input is loaded and the initial variable state is prepared for tracing.',
+    variablesState: variables,
+    systemOutput: sampleInput,
+    purpose: TRACE_PURPOSES['Input Initialization'],
+    sourceStep: 0,
+  }));
+
   logicSteps.forEach((step, index) => {
-    const executionStep = {
-      stepNumber: index + 1,
-      stepDescription: step.description || step.step_description || `Step ${index + 1}`,
-      variablesState: step.variables || {},
-      conditionResult: step.condition_result !== undefined ? step.condition_result : null,
-    };
-    
-    executionSteps.push(executionStep);
+    const description = step.description || step.step_description || `Step ${index + 1}`;
+    const stage = inferStage(step.type || step.step_type, description);
+    const assignments = parseAssignmentsFromText(description, variables);
+
+    assignments.forEach(({ variable, value }) => {
+      variables[variable] = value;
+    });
+
+    if (stage === 'Condition Evaluation') {
+      const expression = extractConditionExpression(description);
+      const conditionResult = step.condition_result !== undefined
+        ? step.condition_result
+        : evaluateSimpleCondition(expression, variables);
+
+      executionSteps.push(createTraceStep({
+        stepNumber: traceStepNumber++,
+        stage,
+        stepDescription: description,
+        variablesState: variables,
+        conditionResult,
+        systemOutput: expression || null,
+        sourceStep: index + 1,
+      }));
+
+      executionSteps.push(createTraceStep({
+        stepNumber: traceStepNumber++,
+        stage: 'Control Flow Movement',
+        stepDescription: conditionResult === null
+          ? 'The system identifies a decision point and waits for the branch outcome from the logic.'
+          : conditionResult
+            ? 'Condition is true, so execution continues through the matching branch.'
+            : 'Condition is false, so execution skips to the alternate path or next valid step.',
+        variablesState: variables,
+        conditionResult,
+        flowAction: conditionResult === null ? 'Decision pending' : conditionResult ? 'Enter true branch' : 'Move to false branch',
+        sourceStep: index + 1,
+      }));
+      return;
+    }
+
+    if (stage === 'Iteration Handling') {
+      const loopDefinition = parseLoopDefinition(description, variables);
+
+      executionSteps.push(createTraceStep({
+        stepNumber: traceStepNumber++,
+        stage,
+        stepDescription: description,
+        variablesState: variables,
+        flowAction: loopDefinition ? `Loop prepared for ${loopDefinition.iterations} tracked iteration(s)` : 'Loop detected from structured logic',
+        sourceStep: index + 1,
+      }));
+
+      if (loopDefinition) {
+        let currentValue = loopDefinition.start;
+        for (let iteration = 1; iteration <= loopDefinition.iterations; iteration += 1) {
+          variables[loopDefinition.loopVariable] = currentValue;
+          executionSteps.push(createTraceStep({
+            stepNumber: traceStepNumber++,
+            stage: 'Iteration Handling',
+            stepDescription: `Iteration ${iteration}: ${loopDefinition.loopVariable} = ${currentValue}`,
+            variablesState: variables,
+            iteration,
+            flowAction: 'Loop body executes for this iteration',
+            sourceStep: index + 1,
+          }));
+          currentValue += loopDefinition.direction;
+        }
+
+        executionSteps.push(createTraceStep({
+          stepNumber: traceStepNumber++,
+          stage: 'Control Flow Movement',
+          stepDescription: `Loop finishes after ${loopDefinition.iterations} tracked iteration(s).`,
+          variablesState: variables,
+          flowAction: 'Exit loop',
+          sourceStep: index + 1,
+        }));
+      }
+      return;
+    }
+
+    if (stage === 'Final Output Generation') {
+      executionSteps.push(createTraceStep({
+        stepNumber: traceStepNumber++,
+        stage,
+        stepDescription: description,
+        variablesState: variables,
+        systemOutput: sampleOutput,
+        flowAction: 'Present final result',
+        sourceStep: index + 1,
+      }));
+      return;
+    }
+
+    executionSteps.push(createTraceStep({
+      stepNumber: traceStepNumber++,
+      stage,
+      stepDescription: description,
+      variablesState: variables,
+      flowAction: assignments.length > 0 ? 'Variables updated' : 'Step recorded',
+      sourceStep: index + 1,
+    }));
   });
-  
+
+  if (!executionSteps.some((step) => step.stage === 'Final Output Generation')) {
+    executionSteps.push(createTraceStep({
+      stepNumber: traceStepNumber++,
+      stage: 'Final Output Generation',
+      stepDescription: 'Trace ends by presenting the final observed output state for the sample run.',
+      variablesState: variables,
+      systemOutput: sampleOutput,
+      flowAction: 'Present final result',
+      sourceStep: logicSteps.length,
+    }));
+  }
+
   return executionSteps;
 };
 

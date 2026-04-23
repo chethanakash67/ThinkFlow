@@ -50,10 +50,20 @@ const submitLogic = async (req, res) => {
     const submission = submissionResult.rows[0];
 
     // Generate execution steps
-    const executionSteps = generateExecutionSteps(logicSteps, problem.test_cases[0]);
+    const executionSteps = generateExecutionSteps(logicSteps, problem.test_cases[0], problem);
     
     // Save execution steps
     for (const step of executionSteps) {
+      const persistedVariablesState = {
+        ...(step.variablesState || {}),
+        stage: step.stage || null,
+        flowAction: step.flowAction || null,
+        iteration: step.iteration || null,
+        systemOutput: step.systemOutput ?? null,
+        purpose: step.purpose || null,
+        sourceStep: step.sourceStep || null,
+      };
+
       await query(
         `INSERT INTO execution_steps (logic_submission_id, step_number, step_description, variables_state, condition_result)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -61,7 +71,7 @@ const submitLogic = async (req, res) => {
           submission.id,
           step.stepNumber,
           step.stepDescription,
-          JSON.stringify(step.variablesState),
+          JSON.stringify(persistedVariablesState),
           step.conditionResult,
         ]
       );
@@ -140,7 +150,22 @@ const getExecutionSteps = async (req, res) => {
       [submissionId]
     );
 
-    res.json({ executionSteps: result.rows });
+    const executionSteps = result.rows.map((step) => ({
+      id: step.id,
+      stepNumber: step.step_number,
+      stage: step.variables_state?.stage || null,
+      stepDescription: step.step_description,
+      variablesState: step.variables_state || {},
+      conditionResult: step.condition_result,
+      flowAction: step.variables_state?.flowAction || null,
+      iteration: step.variables_state?.iteration || null,
+      systemOutput: step.variables_state?.systemOutput ?? null,
+      purpose: step.variables_state?.purpose || null,
+      sourceStep: step.variables_state?.sourceStep || null,
+      createdAt: step.created_at,
+    }));
+
+    res.json({ executionSteps });
   } catch (error) {
     console.error('Get execution steps error:', error);
     res.status(500).json({ error: 'Failed to fetch execution steps' });

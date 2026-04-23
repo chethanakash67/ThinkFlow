@@ -1061,27 +1061,203 @@
   margin-bottom: 1.5rem;
 }
 
-.execution-steps {
+.execution-trace-panel {
   margin-top: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
 }
 
-.execution-step {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 8px;
-  padding: 1rem;
+.execution-trace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
   margin-bottom: 1rem;
 }
 
-.execution-step-number {
-  font-weight: 700;
-  color: #4F46E5;
-  margin-bottom: 0.5rem;
+.execution-trace-subtitle {
+  margin: -0.2rem 0 0;
+  color: #64748B;
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
 
-.execution-step-content {
+.execution-trace-badge {
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: #EEF2FF;
+  color: #4338CA;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.execution-trace-table-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.execution-trace-table-card + .execution-trace-table-card,
+.execution-trace-table-card + .execution-trace-navigator {
+  margin-top: 1rem;
+}
+
+.execution-trace-card-title {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid #E2E8F0;
+  color: #0F172A;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.execution-trace-table-scroll {
+  overflow-x: auto;
+}
+
+.execution-trace-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.execution-trace-table th,
+.execution-trace-table td {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #E2E8F0;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.execution-trace-table th {
+  background: #F8FAFC;
+  color: #475569;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.execution-trace-table tbody tr {
+  transition: background 0.18s ease;
+  cursor: pointer;
+}
+
+.execution-trace-table tbody tr:hover {
+  background: #F8FAFC;
+}
+
+.execution-trace-table tbody tr.active {
+  background: #EEF2FF;
+}
+
+.execution-trace-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.execution-trace-navigator {
+  margin-top: 1rem;
+}
+
+.execution-trace-nav-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.execution-nav-btn {
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #334155;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.execution-nav-btn:hover:not(:disabled) {
+  border-color: #4F46E5;
+  color: #4F46E5;
+}
+
+.execution-nav-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.execution-trace-nav-status {
   color: #64748B;
-  font-size: 0.95rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.execution-trace-focus-card {
+  border: 1px solid #C7D2FE;
+  border-radius: 14px;
+  padding: 1rem;
+  background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 100%);
+}
+
+.execution-trace-focus-step {
+  color: #4338CA;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.execution-trace-focus-stage {
+  margin-top: 0.2rem;
+  color: #0F172A;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.execution-trace-focus-copy {
+  margin-top: 0.55rem;
+  color: #334155;
+  line-height: 1.6;
+  font-size: 0.92rem;
+}
+
+.execution-trace-focus-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+}
+
+.execution-trace-focus-box {
+  border: 1px solid rgba(79, 70, 229, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 0.8rem;
+}
+
+.execution-trace-focus-box span {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #64748B;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.execution-trace-focus-box code {
+  color: #0F172A;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Loading State */
@@ -1449,6 +1625,16 @@
   .code-editor-controls {
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .execution-trace-header,
+  .execution-trace-nav-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .execution-trace-focus-grid {
+    grid-template-columns: 1fr;
   }
 
   .custom-test-grid {
