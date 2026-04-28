@@ -7,7 +7,6 @@ const crypto = require('crypto');
 const { query } = require('../config/db');
 const { generateToken } = require('../middlewares/auth.middleware');
 const { validationResult } = require('express-validator');
-const nodemailer = require('nodemailer');
 const { getUserPointsSummary, getUserRanks } = require('../../services/gamificationService');
 const {
   decryptText,
@@ -18,7 +17,13 @@ const {
 } = require('../utils/secureData');
 
 
-const { sendOTPEmail } = require('../services/emailService');
+const {
+  getEmailProvider,
+  isEmailConfigured,
+  isSendGridConfigured,
+  isSmtpConfigured,
+  sendOTPEmail,
+} = require('../services/emailService');
 let OAuth2Client;
 try {
   ({ OAuth2Client } = require('google-auth-library'));
@@ -213,11 +218,11 @@ const signup = async (req, res) => {
       });
     }
 
-    // Check if email service is configured (SendGrid HTTP API)
-    const sendgridConfigured = !!process.env.SENDGRID_API_KEY;
-    const emailConfigured = sendgridConfigured;
-
-    console.log(`  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} (SendGrid: ${sendgridConfigured})`);
+    const emailConfigured = isEmailConfigured();
+    console.log(
+      `  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} ` +
+      `(Provider: ${getEmailProvider()}, SMTP: ${isSmtpConfigured()}, SendGrid: ${isSendGridConfigured()})`
+    );
 
     if (!emailConfigured) {
       // No email service configured - return error, don't auto-verify
