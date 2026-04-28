@@ -1,8 +1,9 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
+import { getApiUrl } from './api-url';
 
-// API URL: use the Render deployment unless explicitly overridden
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://thinkflow-6t7n.onrender.com/api';
+// Defaults to local API in development and Render in production.
+const API_URL = getApiUrl();
 
 console.log('API URL configured:', API_URL);
 

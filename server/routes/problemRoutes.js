@@ -6,6 +6,7 @@ const problemController = require('../controllers/problemController');
 router.get('/', problemController.getProblems);
 router.post('/reasoning-evaluate', problemController.evaluateReasoning);
 router.post('/:id/ai-help', problemController.getAIHelp);
+router.post('/:id/logic-validation', problemController.validateProblemLogic);
 router.get('/:id', problemController.getProblemById);
 
 module.exports = router;

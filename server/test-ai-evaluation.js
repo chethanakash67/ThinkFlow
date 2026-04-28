@@ -1,6 +1,6 @@
 /**
- * Test Gemini AI Logic Evaluation
- * Run this to test if your Gemini API key is working
+ * Test OpenAI Logic Evaluation
+ * Run this to test if your OpenAI API key is working
  */
 
 require('dotenv').config();
@@ -53,7 +53,7 @@ const testLogicSteps = [
 ];
 
 async function testEvaluation() {
-  console.log('🧪 Testing Gemini AI Logic Evaluation...\n');
+  console.log('🧪 Testing OpenAI Logic Evaluation...\n');
   console.log('Problem:', testProblem.title);
   console.log('Difficulty:', testProblem.difficulty);
   console.log('\nStudent Logic Steps:');
@@ -98,9 +98,9 @@ async function testEvaluation() {
   } catch (error) {
     console.error('❌ Error during evaluation:', error.message);
     console.log('\n💡 Tips:');
-    console.log('  1. Make sure GEMINI_API_KEY is set in server/.env');
+    console.log('  1. Make sure OPENAI_API_KEY is set in server/.env');
     console.log('  2. Check your internet connection');
-    console.log('  3. Verify your API key at https://makersuite.google.com/app/apikey');
+    console.log('  3. Verify your API key in your OpenAI dashboard');
   }
 }
 

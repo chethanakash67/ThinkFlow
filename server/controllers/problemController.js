@@ -1,6 +1,7 @@
 const { query } = require('../src/config/db');
 const { generateAIHelp } = require('../services/aiHelpService');
 const { generateReasoningEvaluation } = require('../services/reasoningModelService');
+const { validateLogic } = require('../services/logicValidationService');
 
 const getDedupedProblemsQuery = (hasDifficultyFilter) => {
   const whereClause = hasDifficultyFilter ? 'WHERE difficulty = $1' : '';
@@ -93,6 +94,33 @@ const getAIHelp = async (req, res) => {
   } catch (error) {
     console.error('AI help error:', error);
     res.status(500).json({ error: 'Failed to generate AI help' });
+  }
+};
+
+// Validate a user's English-to-Code Blueprint against the current problem.
+const validateProblemLogic = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userLogic } = req.body || {};
+
+    if (!String(userLogic || '').trim()) {
+      return res.status(400).json({ error: 'userLogic is required' });
+    }
+
+    const result = await query(
+      'SELECT id, title, description, difficulty, constraints, examples, expected_outputs FROM problems WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    const validation = await validateLogic(String(userLogic), result.rows[0]);
+    res.json({ validation });
+  } catch (error) {
+    console.error('Logic validation error:', error);
+    res.status(500).json({ error: 'Failed to validate logic' });
   }
 };
 
@@ -236,6 +264,7 @@ module.exports = {
   getProblems,
   getProblemById,
   getAIHelp,
+  validateProblemLogic,
   evaluateReasoning,
   createProblem,
   updateProblem,

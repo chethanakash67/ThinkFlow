@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import { LogicWorkspaceProvider, useLogicWorkspace, type LogicNode, type SyncMap } from '@/context/logic-workspace.context'
 import { getCurrentUser, logout } from '@/lib/auth'
 import api from '@/lib/api'
-import { FaSignOutAlt, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaArrowLeft, FaPlus, FaTrash, FaLightbulb, FaRobot } from 'react-icons/fa'
+import { FaSignOutAlt, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaArrowLeft, FaLightbulb, FaRobot, FaMoon, FaSun, FaEye, FaEyeSlash, FaInfoCircle } from 'react-icons/fa'
 import dynamic from 'next/dynamic'
 import './problem-detail.css'
 
@@ -26,20 +27,10 @@ interface LogicStep {
   step_number: number
   description: string
   type?: string
-}
-
-interface ExecutionTraceStep {
-  id?: number
-  stepNumber: number
-  stage: string
-  stepDescription: string
-  variablesState: Record<string, any>
-  conditionResult?: boolean | null
-  flowAction?: string | null
-  iteration?: number | null
-  systemOutput?: any
-  purpose?: string | null
-  sourceStep?: number | null
+  complexity?: string
+  isValid?: boolean | null
+  starterComment?: string
+  error?: string | null
 }
 
 interface EditorHint {
@@ -48,21 +39,267 @@ interface EditorHint {
   snippet: string
 }
 
+interface LogicFeedbackNode {
+  id: number
+  status: 'correct' | 'warning' | 'error'
+  message: string
+}
+
+interface LogicInsight {
+  line: number
+  type: 'error' | 'warning' | 'info'
+  message: string
+}
+
+interface LogicValidationResult {
+  overall_status: 'valid' | 'warning' | 'invalid'
+  feedback_nodes: LogicFeedbackNode[]
+  source?: string
+}
+
+type FlowNodeStatus = LogicFeedbackNode['status'] | 'idle'
+
+const FATAL_DIAGNOSTIC_PHASES = new Set(['compile', 'runtime', 'time_limit', 'memory_limit', 'output_limit'])
+
+const getPrimaryExecutionDiagnostic = (submission: any) => {
+  if (!submission) return null
+
+  const directDiagnostic = submission.errorDetails
+  const fatalResult = Array.isArray(submission.results)
+    ? submission.results.find((result: any) => FATAL_DIAGNOSTIC_PHASES.has(result?.errorDetails?.phase))
+    : null
+  const fallbackResult = Array.isArray(submission.results)
+    ? submission.results.find((result: any) => result?.error)
+    : null
+  const sourceResult = fatalResult || (submission.status === 'error' ? fallbackResult : null)
+  const diagnostic = directDiagnostic?.title || directDiagnostic?.message
+    ? directDiagnostic
+    : sourceResult?.errorDetails
+
+  if (diagnostic?.title || diagnostic?.message) {
+    return {
+      ...diagnostic,
+      input: sourceResult?.input,
+      expectedOutput: sourceResult?.expectedOutput,
+      actualOutput: sourceResult?.actualOutput,
+      fallbackError: sourceResult?.error || submission.error,
+    }
+  }
+
+  if (sourceResult?.error || submission.error) {
+    const message = sourceResult?.error || submission.error
+    return {
+      phase: 'runtime',
+      title: 'Execution Error',
+      severity: 'error',
+      message,
+      raw: message,
+      input: sourceResult?.input,
+      expectedOutput: sourceResult?.expectedOutput,
+      actualOutput: sourceResult?.actualOutput,
+    }
+  }
+
+  return null
+}
+
+const getDiagnosticRawText = (diagnostic: any) => (
+  String(diagnostic?.raw || diagnostic?.stderr || diagnostic?.fallbackError || diagnostic?.message || '').trim()
+)
+
+const normalizeLogicInsights = (payload: any): LogicInsight[] => {
+  const rawInsights = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.insights)
+      ? payload.insights
+      : []
+  const seen = new Set<string>()
+
+  return rawInsights
+    .map((insight: any) => {
+      const line = Number(insight?.line)
+      const type: LogicInsight['type'] = insight?.type === 'error' || insight?.type === 'warning' || insight?.type === 'info'
+        ? insight.type
+        : 'warning'
+      const message = String(insight?.message || '').trim()
+
+      if (!Number.isFinite(line) || !message) return null
+
+      return {
+        line: Math.max(1, Math.round(line)),
+        type,
+        message
+      }
+    })
+    .filter((insight: LogicInsight | null): insight is LogicInsight => {
+      if (!insight) return false
+      const key = `${insight.line}:${insight.type}:${insight.message.toLowerCase()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+const buildProblemDescriptionForLogic = (currentProblem: any) => [
+  currentProblem?.title,
+  currentProblem?.description,
+  currentProblem?.constraints,
+  currentProblem?.examples ? JSON.stringify(currentProblem.examples) : ''
+].filter(Boolean).join('\n')
+
+const buildLogicValidationFromInsights = (insights: LogicInsight[]): LogicValidationResult => {
+  const hasError = insights.some((insight) => insight.type === 'error')
+  const hasWarning = insights.some((insight) => insight.type === 'warning')
+
+  return {
+    overall_status: hasError ? 'invalid' : hasWarning ? 'warning' : 'valid',
+    feedback_nodes: insights.map((insight) => ({
+      id: insight.line,
+      status: insight.type === 'error' ? 'error' : insight.type === 'warning' ? 'warning' : 'correct',
+      message: insight.message
+    })),
+    source: 'logic-analysis'
+  }
+}
+
+const LOGIC_INSIGHT_SEVERITY: Record<LogicInsight['type'], number> = {
+  info: 1,
+  warning: 2,
+  error: 3
+}
+
+const isCriticalMismatchInsight = (insight: LogicInsight) => /critical mismatch/i.test(insight.message)
+
+const compactAuditorInsights = (insights: LogicInsight[]) => {
+  const seen = new Set<string>()
+  const uniqueInsights = insights.filter((insight) => {
+    const key = `${insight.type}:${insight.message.toLowerCase()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const criticalFindings = uniqueInsights.filter(isCriticalMismatchInsight)
+
+  if (criticalFindings.length === 0) return uniqueInsights
+
+  const primaryCritical = criticalFindings.find((insight) => (
+    /\bfail cases\b|\brequires\b|\bshould produce\b|\bexample\b/i.test(insight.message)
+  )) || criticalFindings[0]
+
+  return [
+    primaryCritical,
+    {
+      line: primaryCritical.line,
+      type: 'warning' as const,
+      message: 'Rewrite the Blueprint: calculate digit product for each number, sort by digit product ascending, then tie by actual value ascending.'
+    }
+  ]
+}
+
+interface UseSyncLogicOptions {
+  enabled: boolean
+  logicText: string
+  problem: any
+  language: string
+  parseRequestRef: MutableRefObject<number>
+  normalizeParsedNodes: (nodes: any[]) => LogicNode[]
+  setNodes: (nodes: LogicNode[]) => void
+  setSyncMap: (syncMap: SyncMap) => void
+  setParsingLogic: (value: boolean) => void
+}
+
+const useSyncLogic = ({
+  enabled,
+  logicText,
+  problem,
+  language,
+  parseRequestRef,
+  normalizeParsedNodes,
+  setNodes,
+  setSyncMap,
+  setParsingLogic
+}: UseSyncLogicOptions) => {
+  useEffect(() => {
+    if (!enabled || !problem) return
+    const trimmedLogic = logicText.trim()
+
+    if (!trimmedLogic) {
+      setNodes([])
+      setSyncMap({})
+      setParsingLogic(false)
+      return
+    }
+
+    const requestId = parseRequestRef.current + 1
+    parseRequestRef.current = requestId
+    setParsingLogic(true)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await api.post('/parse-logic', {
+          userLogic: trimmedLogic,
+          problemContext: {
+            title: problem?.title,
+            description: problem?.description,
+            constraints: problem?.constraints,
+            examples: problem?.examples
+          }
+        })
+
+        if (parseRequestRef.current !== requestId) return
+
+        const parsedNodes = normalizeParsedNodes(response.data.nodes || [])
+        setNodes(parsedNodes)
+      } catch (error) {
+        console.error('Logic parsing failed:', error)
+      } finally {
+        if (parseRequestRef.current === requestId) {
+          setParsingLogic(false)
+        }
+      }
+    }, 300)
+
+    return () => window.clearTimeout(timer)
+  }, [enabled, logicText, problem])
+}
+
 export default function ProblemDetailPage() {
+  return (
+    <LogicWorkspaceProvider>
+      <ProblemDetailContent />
+    </LogicWorkspaceProvider>
+  )
+}
+
+function ProblemDetailContent() {
   const params = useParams()
   const router = useRouter()
   const searchParams = useSearchParams()
   const problemId = params.id as string
   const isCompetitionMode = searchParams.get('mode') === 'competition'
+  const {
+    nodes,
+    setNodes,
+    updateNode,
+    code,
+    setCode,
+    syncMap,
+    setSyncMap,
+    activeLine,
+    setActiveLine,
+    focusedNodeId,
+    setFocusedNodeId,
+    implementedNodeIds,
+    setImplementedNodeIds
+  } = useLogicWorkspace()
 
   const [problem, setProblem] = useState<any>(null)
-  const [logicSteps, setLogicSteps] = useState<LogicStep[]>([])
-  const [code, setCode] = useState('')
-  const [language, setLanguage] = useState('javascript')
-  const [submission, setSubmission] = useState<any>(null)
+  const [englishLogic, setEnglishLogic] = useState('')
+  const [language, setLanguage] = useState(() => {
+    if (typeof window === 'undefined') return 'cpp'
+    return localStorage.getItem('thinkflow:preferred-language') || 'cpp'
+  })
   const [codeSubmission, setCodeSubmission] = useState<any>(null)
-  const [executionSteps, setExecutionSteps] = useState<ExecutionTraceStep[]>([])
-  const [currentExecutionIndex, setCurrentExecutionIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showCodeEditor, setShowCodeEditor] = useState(true)
@@ -81,11 +318,88 @@ export default function ProblemDetailPage() {
   const [customExpectedText, setCustomExpectedText] = useState(DEFAULT_CUSTOM_EXPECTED)
   const [customRunResult, setCustomRunResult] = useState<any>(null)
   const [runningCustomTest, setRunningCustomTest] = useState(false)
+  const [showTestTray, setShowTestTray] = useState(false)
+  const [logicValidation, setLogicValidation] = useState<LogicValidationResult | null>(null)
+  const [logicInsights, setLogicInsights] = useState<LogicInsight[]>([])
+  const [validatingLogic, setValidatingLogic] = useState(false)
+  const [parsingLogic, setParsingLogic] = useState(false)
+  const [complexityToast, setComplexityToast] = useState('')
+  const [focusMode, setFocusMode] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [programmingTheme, setProgrammingTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark'
+    return localStorage.getItem('thinkflow:programming-theme') === 'light' ? 'light' : 'dark'
+  })
+  const [showExecutionTrace, setShowExecutionTrace] = useState(false)
+  const [showQuestionPane, setShowQuestionPane] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('thinkflow:show-question-pane') !== 'false'
+  })
+  const [showBlueprintPane, setShowBlueprintPane] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('thinkflow:show-blueprint-pane') !== 'false'
+  })
   const [draftSavedAt, setDraftSavedAt] = useState<string>('')
+  const blueprintTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const blueprintHighlightRef = useRef<HTMLDivElement | null>(null)
   const completionProviderRef = useRef<any>(null)
+  const ghostDecorationsRef = useRef<any>(null)
+  const syncMapRef = useRef<SyncMap>({})
   const draftLoadedRef = useRef(false)
   const customInputEditedRef = useRef(false)
   const customExpectedEditedRef = useRef(false)
+  const lastBlueprintRef = useRef('')
+  const starterCodeRef = useRef('')
+  const parseRequestRef = useRef(0)
+  const validationRequestRef = useRef(0)
+
+  useEffect(() => {
+    syncMapRef.current = syncMap
+  }, [syncMap])
+
+  const logicSteps: LogicStep[] = nodes.map((node) => ({
+    step_number: node.id,
+    description: node.text,
+    type: node.type?.toLowerCase(),
+    complexity: node.complexity,
+    isValid: node.isValid,
+    starterComment: node.starterComment,
+    error: node.error
+  }))
+
+  const setLogicSteps = (steps: LogicStep[]) => {
+    setNodes(steps.map((step) => ({
+      id: step.step_number,
+      text: step.description,
+      type: step.type ? step.type.charAt(0).toUpperCase() + step.type.slice(1) : 'Process',
+      isValid: step.isValid ?? null,
+      complexity: step.complexity || 'O(?)',
+      starterComment: step.starterComment || step.description,
+      error: step.error || null
+    })))
+  }
+
+  const handleLanguageChange = (nextLanguage: string) => {
+    setLanguage(nextLanguage)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('thinkflow:preferred-language', nextLanguage)
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem('thinkflow:programming-theme', programmingTheme)
+  }, [programmingTheme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem('thinkflow:show-question-pane', String(showQuestionPane))
+  }, [showQuestionPane])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem('thinkflow:show-blueprint-pane', String(showBlueprintPane))
+  }, [showBlueprintPane])
 
   useEffect(() => {
     const loadUser = async () => {
@@ -106,6 +420,9 @@ export default function ProblemDetailPage() {
     customExpectedEditedRef.current = false
     setCustomInputText(DEFAULT_CUSTOM_INPUT)
     setCustomExpectedText(DEFAULT_CUSTOM_EXPECTED)
+    setLogicValidation(null)
+    setLogicInsights([])
+    setValidatingLogic(false)
   }, [problemId])
 
   useEffect(() => {
@@ -144,20 +461,46 @@ export default function ProblemDetailPage() {
   }, [language, editorInstance])
 
   useEffect(() => {
+    if (!editorInstance) return
+    const monaco = (window as any).monaco
+    const model = editorInstance.getModel?.()
+    if (!monaco || !model) return
+
+    const executionDiagnostic = getPrimaryExecutionDiagnostic(codeSubmission)
+    const markers = [
+      ...syntaxErrors
+        .filter((error) => Number.isFinite(Number(error.line)))
+        .map((error) => ({
+          severity: monaco.MarkerSeverity.Error,
+          startLineNumber: Math.max(1, Number(error.line)),
+          startColumn: 1,
+          endLineNumber: Math.max(1, Number(error.line)),
+          endColumn: model.getLineMaxColumn(Math.max(1, Number(error.line))),
+          message: error.message || 'Syntax error',
+          source: 'ThinkFlow syntax',
+        })),
+      ...(executionDiagnostic?.lineNumber ? [{
+        severity: monaco.MarkerSeverity.Error,
+        startLineNumber: Math.max(1, Number(executionDiagnostic.lineNumber)),
+        startColumn: Math.max(1, Number(executionDiagnostic.columnNumber || 1)),
+        endLineNumber: Math.max(1, Number(executionDiagnostic.lineNumber)),
+        endColumn: model.getLineMaxColumn(Math.max(1, Number(executionDiagnostic.lineNumber))),
+        message: executionDiagnostic.message || executionDiagnostic.title || 'Execution error',
+        source: executionDiagnostic.title || 'ThinkFlow compiler',
+      }] : []),
+    ]
+
+    monaco.editor.setModelMarkers(model, 'thinkflow-execution', markers)
+  }, [editorInstance, syntaxErrors, codeSubmission])
+
+  useEffect(() => {
     const fetchProblem = async () => {
       try {
         const response = await api.get(`/problems/${problemId}`)
         const fetchedProblem = response.data.problem
         setProblem(fetchedProblem)
         
-        // Initialize logic steps based on problem difficulty
-        const initialStepsCount = getInitialStepsCount(fetchedProblem?.difficulty)
-        const initialSteps = Array.from({ length: initialStepsCount }, (_, i) => ({
-          step_number: i + 1,
-          description: '',
-          type: i === 0 ? 'input' : i === initialStepsCount - 1 ? 'output' : 'process'
-        }))
-        setLogicSteps(initialSteps)
+        setLogicSteps([])
       } catch (error) {
         console.error('Failed to fetch problem:', error)
       } finally {
@@ -223,47 +566,223 @@ export default function ProblemDetailPage() {
     }
   }, [editorInstance, language, problem])
 
-  const getInitialStepsCount = (difficulty: string) => {
-    switch (difficulty?.toLowerCase()) {
-      case 'easy':
-        return 3
-      case 'medium':
-        return 5
-      case 'hard':
-        return 7
-      default:
-        return 4
+  useEffect(() => {
+    if (!editorInstance) return
+    const monaco = (window as any).monaco
+    if (!monaco) return
+
+    const model = editorInstance.getModel?.()
+    const maxLine = model?.getLineCount?.() || 1
+    const decorations = nodes
+      .map((node) => {
+        const range = syncMap[node.id]
+        if (!range) return null
+        if (range.commentLine > maxLine) return null
+        const implemented = implementedNodeIds.includes(node.id)
+        const invalid = node.isValid === false
+
+        return {
+          range: new monaco.Range(range.commentLine, 1, range.commentLine, 1),
+          options: {
+            isWholeLine: false,
+            className: invalid ? 'logic-ghost-line-error' : implemented ? 'logic-ghost-line-implemented' : 'logic-ghost-line',
+            glyphMarginClassName: invalid ? 'logic-ghost-glyph-error' : 'logic-ghost-glyph',
+            after: {
+              content: `  ${getGhostComment(node).replace(/^\/{1,2}|^#/, '').trim()}`,
+              inlineClassName: invalid
+                ? 'logic-ghost-text-error'
+                : implemented
+                  ? 'logic-ghost-text-implemented'
+                  : 'logic-ghost-text'
+            },
+            hoverMessage: {
+              value: invalid
+                ? node.error || 'This code appears to conflict with the logic node.'
+                : implemented
+                  ? 'Implementation in progress for this logic node.'
+                  : 'Ghost logic hint. Add code directly beneath it.'
+            }
+          }
+        }
+      })
+      .filter(Boolean)
+
+    ghostDecorationsRef.current = editorInstance.deltaDecorations(ghostDecorationsRef.current || [], decorations)
+  }, [editorInstance, implementedNodeIds, nodes, syncMap])
+
+  const isPlainRecord = (value: any) => (
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+  )
+
+  const sanitizeParamName = (name: string) => {
+    const safeName = String(name || 'inputData').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^\d/, '_$&')
+    return safeName || 'inputData'
+  }
+
+  const getProblemSampleInput = (currentProblem: any) => (
+    currentProblem?.examples?.[0]?.input ??
+    currentProblem?.test_cases?.[0]?.input ??
+    currentProblem?.testCases?.[0]?.input ??
+    null
+  )
+
+  const getProblemSampleOutput = (currentProblem: any) => (
+    currentProblem?.examples?.[0]?.output ??
+    currentProblem?.expected_outputs?.[0]?.output ??
+    currentProblem?.test_cases?.[0]?.output ??
+    null
+  )
+
+  const getStarterEntries = (input: any) => {
+    if (isPlainRecord(input)) {
+      const entries = Object.entries(input).map(([name, value]) => ({
+        name: sanitizeParamName(name),
+        value
+      }))
+      return entries.length > 0 ? entries : [{ name: 'inputData', value: input }]
     }
+
+    return [{ name: 'inputData', value: input }]
+  }
+
+  const getStarterFunctionName = (currentProblem: any) => {
+    const words = String(currentProblem?.title || 'solve')
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+
+    if (words.length === 0) return 'solve'
+
+    const [firstWord, ...restWords] = words
+    const name = [
+      firstWord.toLowerCase(),
+      ...restWords.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    ].join('')
+
+    return name.replace(/^\d/, '_$&') || 'solve'
+  }
+
+  const inferCppType = (value: any): string => {
+    if (Array.isArray(value)) {
+      const innerType = value.length > 0 ? inferCppType(value[0]) : 'int'
+      return `vector<${innerType}>`
+    }
+    if (typeof value === 'string') return 'string'
+    if (typeof value === 'boolean') return 'bool'
+    if (typeof value === 'number' && !Number.isInteger(value)) return 'double'
+    return 'int'
+  }
+
+  const inferCppParam = (value: any, name: string) => {
+    const type = inferCppType(value)
+    if (type.startsWith('vector<')) return `${type}& ${name}`
+    return `${type} ${name}`
+  }
+
+  const inferJavaType = (value: any): string => {
+    if (Array.isArray(value)) {
+      const innerType = value.length > 0 ? inferJavaType(value[0]) : 'int'
+      return `${innerType}[]`
+    }
+    if (typeof value === 'string') return 'String'
+    if (typeof value === 'boolean') return 'boolean'
+    if (typeof value === 'number' && !Number.isInteger(value)) return 'double'
+    return 'int'
+  }
+
+  const inferCType = (value: any, name: string) => (
+    Array.isArray(value)
+      ? `int* ${name}, int ${name}_len`
+      : typeof value === 'string'
+        ? `char* ${name}`
+        : `int ${name}`
+  )
+
+  const defaultReturnForType = (type: string, currentLanguage: string) => {
+    if (currentLanguage === 'python') return 'None'
+    if (currentLanguage === 'javascript') return 'null'
+    if (currentLanguage === 'java') {
+      if (type.endsWith('[]')) return `new ${type.replace(/\[\]$/, '')}[0]`
+      if (type === 'String') return '""'
+      if (type === 'boolean') return 'false'
+      if (type === 'double') return '0.0'
+      return '0'
+    }
+    if (currentLanguage === 'cpp') {
+      if (type.startsWith('vector<')) return '{}'
+      if (type === 'string') return '""'
+      if (type === 'bool') return 'false'
+      if (type === 'double') return '0.0'
+      return '0'
+    }
+    if (type.includes('*')) return 'NULL'
+    return '0'
+  }
+
+  const isEmptyStarterLikeCode = (currentCode: string) => {
+    const withoutBlueprint = stripBlueprintCommentScaffold(currentCode)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '')
+      .replace(/#.*$/gm, '')
+      .replace(/\busing\s+namespace\s+std\s*;/g, '')
+      .replace(/\bimport\s+java\.util\.\*;\s*/g, '')
+      .trim()
+    const compact = withoutBlueprint.replace(/\s+/g, '')
+
+    return (
+      !compact ||
+      /^function[a-zA-Z_]\w*\([^)]*\)\{(?:returnnull;?)?\}$/.test(compact) ||
+      /^def[a-zA-Z_]\w*\([^)]*\):pass$/.test(compact) ||
+      /^(?:public)?classSolution\{publicstatic[\w<>\[\]]+[a-zA-Z_]\w*\([^)]*\)\{(?:return(?:null|false|0|0\.0|new\w+\[0\]);)?\}\}$/.test(compact) ||
+      /^classSolution\{public:(?:int|double|bool|string|vector<.*>)[a-zA-Z_]\w*\([^)]*\)\{(?:return(?:0|0\.0|false|""|\{\});)?\}\};?$/.test(compact) ||
+      /^(?:int|double|bool|string|vector<.*>)[a-zA-Z_]\w*\([^)]*\)\{(?:return(?:0|0\.0|false|""|\{\});)?\}$/.test(compact) ||
+      /^(?:int|double|char\*|int\*)[a-zA-Z_]\w*\([^)]*\)\{(?:return(?:0|NULL);)?\}$/.test(compact)
+    )
+  }
+
+  const buildStarterCode = (currentProblem: any, currentLanguage: string) => {
+    const sampleInput = getProblemSampleInput(currentProblem)
+    const sampleOutput = getProblemSampleOutput(currentProblem)
+    const entries = getStarterEntries(sampleInput)
+    const paramNames = entries.map((entry) => entry.name)
+    const functionName = getStarterFunctionName(currentProblem)
+
+    if (currentLanguage === 'python') {
+      return `def ${functionName}(${paramNames.join(', ') || 'input_data'}):\n    pass\n`
+    }
+
+    if (currentLanguage === 'java') {
+      const returnType = inferJavaType(sampleOutput)
+      const params = entries.map((entry) => `${inferJavaType(entry.value)} ${entry.name}`).join(', ') || 'Object inputData'
+      return `class Solution {\n    public static ${returnType} ${functionName}(${params}) {\n        \n    }\n}\n`
+    }
+
+    if (currentLanguage === 'cpp') {
+      const returnType = inferCppType(sampleOutput)
+      const params = entries.map((entry) => inferCppParam(entry.value, entry.name)).join(', ') || 'int inputData'
+      return `class Solution {\npublic:\n    ${returnType} ${functionName}(${params}) {\n        \n    }\n};\n`
+    }
+
+    if (currentLanguage === 'c') {
+      const returnsArray = Array.isArray(sampleOutput)
+      const returnType = returnsArray ? 'int*' : 'int'
+      const params = entries.map((entry) => inferCType(entry.value, entry.name)).join(', ') || 'int inputData'
+      return `${returnType} ${functionName}(${params}) {\n    \n}\n`
+    }
+
+    return `function ${functionName}(${paramNames.join(', ') || 'inputData'}) {\n  \n}\n`
   }
 
   const buildEditorHints = (currentProblem: any, currentLanguage: string): EditorHint[] => {
     const title = (currentProblem?.title || '').toLowerCase()
-    const functionTemplate =
-      currentLanguage === 'python'
-        ? 'def solve(input_data):\n    # 1) Parse input\n    # 2) Apply algorithm\n    # 3) Return output\n    return None\n'
-        : currentLanguage === 'java'
-          ? 'public class Solution {\n  public static Object solve(Object inputData) {\n    // 1) Parse input\n    // 2) Apply algorithm\n    // 3) Return output\n    return null;\n  }\n}\n'
-          : currentLanguage === 'cpp'
-            ? '#include <bits/stdc++.h>\nusing namespace std;\n\nint solve(vector<int>& nums) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return 0;\n}\n'
-            : currentLanguage === 'c'
-              ? '#include <stdio.h>\n\nint solve(int* nums, int n) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return 0;\n}\n'
-              : 'function solve(inputData) {\n  // 1) Parse input\n  // 2) Apply algorithm\n  // 3) Return output\n  return null;\n}\n'
-
-    const complexityComment =
-      currentLanguage === 'python'
-        ? '# Time: O(...)\n# Space: O(...)\n'
-        : '// Time: O(...)\n// Space: O(...)\n'
+    const functionTemplate = buildStarterCode(currentProblem, currentLanguage)
 
     const commonHints: EditorHint[] = [
       {
         title: 'Starter Template',
         description: `Insert a ${currentLanguage} solve template.`,
         snippet: functionTemplate
-      },
-      {
-        title: 'Complexity Note',
-        description: 'Add time/space complexity placeholders.',
-        snippet: complexityComment
       }
     ]
 
@@ -339,17 +858,31 @@ export default function ProblemDetailPage() {
     if (!problem || draftLoadedRef.current) return
     const rawDraft = localStorage.getItem(getDraftStorageKey())
     if (!rawDraft) {
+      const starterCode = buildStarterCode(problem, language)
+      starterCodeRef.current = starterCode
+      setCode(starterCode)
       draftLoadedRef.current = true
       return
     }
 
     try {
       const draft = JSON.parse(rawDraft)
-      if (draft.code && typeof draft.code === 'string') {
-        setCode(draft.code)
+      const draftLanguage = typeof draft.language === 'string' ? draft.language : language
+      const starterCode = buildStarterCode(problem, draftLanguage)
+      const draftCode = typeof draft.code === 'string' ? draft.code : ''
+      const draftCodeBody = stripBlueprintCommentScaffold(draftCode)
+      starterCodeRef.current = starterCode
+
+      if (draftCodeBody.trim() && !isEmptyStarterLikeCode(draftCode)) {
+        setCode(draftCode)
+      } else {
+        setCode(starterCode)
       }
       if (draft.language && typeof draft.language === 'string') {
-        setLanguage(draft.language)
+        handleLanguageChange(draft.language)
+      }
+      if (draft.englishLogic && typeof draft.englishLogic === 'string') {
+        setEnglishLogic(draft.englishLogic)
       }
       if (Array.isArray(draft.logicSteps) && draft.logicSteps.length > 0) {
         setLogicSteps(draft.logicSteps)
@@ -365,113 +898,476 @@ export default function ProblemDetailPage() {
   }, [problem, problemId])
 
   useEffect(() => {
+    if (!problem || !draftLoadedRef.current) return
+
+    const nextStarter = buildStarterCode(problem, language)
+    const previousStarter = starterCodeRef.current
+    const generatedBlueprint = englishLogic.trim()
+      ? buildBlueprintCommentScaffold(englishLogic, language)
+      : null
+
+    if (generatedBlueprint) {
+      setSyncMap(generatedBlueprint.syncMap)
+    }
+
+    setCode((prev) => {
+      const body = stripBlueprintCommentScaffold(prev)
+      const shouldReplaceBody = (
+        !body.trim() ||
+        Boolean(previousStarter && body.trim() === previousStarter.trim()) ||
+        isEmptyStarterLikeCode(body)
+      )
+
+      starterCodeRef.current = nextStarter
+
+      if (!shouldReplaceBody) {
+        return prev
+      }
+
+      const nextBody = nextStarter.trimEnd()
+      const nextCode = generatedBlueprint
+        ? `${generatedBlueprint.code}\n\n${nextBody}\n`
+        : `${nextBody}\n`
+
+      lastBlueprintRef.current = nextCode
+      return nextCode
+    })
+  }, [language, problem])
+
+  useEffect(() => {
     if (!draftLoadedRef.current || !problem) return
     const payload = {
       code,
       language,
+      englishLogic,
       logicSteps,
       updatedAt: new Date().toISOString()
     }
     localStorage.setItem(getDraftStorageKey(), JSON.stringify(payload))
     setDraftSavedAt(new Date(payload.updatedAt).toLocaleString())
-  }, [code, language, logicSteps, problem, problemId])
+  }, [code, language, englishLogic, nodes, problem, problemId])
 
-  const addLogicStep = () => {
-    setLogicSteps([
-      ...logicSteps,
-      { step_number: logicSteps.length + 1, description: '', type: 'process' },
-    ])
+  const splitEnglishLogic = (text: string) => text
+    .split(/\n+|(?:^|\s)(?:first|then|next|after that|finally|lastly|step \d+[:.)])/i)
+    .map((part) => part.trim().replace(/^[,.;:\-\s]+/, '').trim())
+    .filter(Boolean)
+
+  const inferStepType = (description: string, index: number, total: number) => {
+    const lower = description.toLowerCase()
+    if (/\b(input|parse|read|receive)\b/.test(lower)) return 'input'
+    if (index === total - 1 || /\b(return|output|print|answer)\b/.test(lower)) return 'output'
+    if (/\b(if|when|unless|condition|check)\b/.test(lower)) return 'condition'
+    if (/\b(loop|iterate|for each|while|traverse)\b/.test(lower)) return 'loop'
+    return 'process'
   }
 
-  const removeLogicStep = (index: number) => {
-    setLogicSteps(logicSteps.filter((_, i) => i !== index).map((step, i) => ({
-      ...step,
-      step_number: i + 1,
-    })))
+  const buildLogicStepsFromEnglish = (text: string): LogicStep[] => {
+    const parts = splitEnglishLogic(text)
+    return parts.map((description, index) => ({
+      step_number: index + 1,
+      description,
+      type: inferStepType(description, index, parts.length)
+    }))
   }
 
-  const updateLogicStep = (index: number, field: string, value: string) => {
-    const updated = [...logicSteps]
-    updated[index] = { ...updated[index], [field]: value }
-    setLogicSteps(updated)
+  const getCommentPrefix = (currentLanguage: string) => (
+    currentLanguage === 'python' ? '#' : '//'
+  )
+
+  const buildLiveBlueprint = (text: string, currentLanguage: string) => {
+    const steps = buildLogicStepsFromEnglish(text)
+    const comment = getCommentPrefix(currentLanguage)
+    const fallbackSteps = steps.length > 0
+      ? steps
+      : [
+          { step_number: 1, description: 'Describe the input you will read or transform', type: 'input' },
+          { step_number: 2, description: 'Describe the main algorithm in plain English', type: 'process' },
+          { step_number: 3, description: 'Describe what the solution should return', type: 'output' }
+        ]
+
+    const lines = fallbackSteps.map((step) => `${comment} ${step.step_number}. ${step.description}`)
+
+    if (currentLanguage === 'python') {
+      return `def solve(input_data):\n    ${lines.join('\n    ')}\n    pass\n`
+    }
+
+    if (currentLanguage === 'java') {
+      return `public class Solution {\n  public static Object solve(Object inputData) {\n    ${lines.join('\n    ')}\n    return null;\n  }\n}\n`
+    }
+
+    if (currentLanguage === 'cpp') {
+      return `#include <bits/stdc++.h>\nusing namespace std;\n\nint solve() {\n  ${lines.join('\n  ')}\n  return 0;\n}\n`
+    }
+
+    if (currentLanguage === 'c') {
+      return `#include <stdio.h>\n\nint solve() {\n  ${lines.join('\n  ')}\n  return 0;\n}\n`
+    }
+
+    return `function solve(inputData) {\n  ${lines.join('\n  ')}\n  return null;\n}\n`
   }
 
-  const formatTraceValue = (value: any) => {
-    if (value === null) return 'null'
-    if (value === undefined) return '—'
-    if (typeof value === 'string') return value
+  const normalizeParsedNodes = (rawNodes: any[]): LogicNode[] => (
+    rawNodes.map((node, index) => ({
+      id: Number.isFinite(Number(node.id)) ? Number(node.id) : index + 1,
+      text: String(node.text || node.description || node.starter_comment || '').trim(),
+      type: node.type || 'Process',
+      isValid: node.error ? false : node.isValid ?? null,
+      complexity: node.complexity || 'O(?)',
+      starterComment: node.starter_comment || node.starterComment || node.text || '',
+      error: node.error || null
+    })).filter((node) => node.text)
+  )
 
-    try {
-      return JSON.stringify(value)
-    } catch (error) {
-      return String(value)
+  const getGhostComment = (node: LogicNode, currentLanguage = language) => {
+    const prefix = getCommentPrefix(currentLanguage)
+    return `${prefix} LOGIC ${node.id}: ${node.starterComment || node.text} [${node.type}, ${node.complexity}]`
+  }
+
+  const buildGhostCodeFromNodes = (nextNodes: LogicNode[], currentLanguage = language) => {
+    const map: SyncMap = {}
+    const lines: string[] = []
+
+    const pushNodeLines = (indent = '') => {
+      nextNodes.forEach((node) => {
+        const implementationStartLine = lines.length + 1
+        lines.push(indent)
+        map[node.id] = {
+          startLine: implementationStartLine,
+          endLine: implementationStartLine,
+          commentLine: implementationStartLine,
+          implementationStartLine,
+          implementationEndLine: implementationStartLine
+        }
+      })
+    }
+
+    if (currentLanguage === 'python') {
+      lines.push('def solve(input_data):')
+      pushNodeLines('    ')
+      lines.push('    return None')
+    } else if (currentLanguage === 'java') {
+      lines.push('public class Solution {')
+      lines.push('  public static Object solve(Object inputData) {')
+      pushNodeLines('    ')
+      lines.push('    return null;')
+      lines.push('  }')
+      lines.push('}')
+    } else if (currentLanguage === 'cpp') {
+      lines.push('#include <bits/stdc++.h>')
+      lines.push('using namespace std;')
+      lines.push('')
+      lines.push('int solve() {')
+      pushNodeLines('  ')
+      lines.push('  return 0;')
+      lines.push('}')
+    } else if (currentLanguage === 'c') {
+      lines.push('#include <stdio.h>')
+      lines.push('')
+      lines.push('int solve() {')
+      pushNodeLines('  ')
+      lines.push('  return 0;')
+      lines.push('}')
+    } else {
+      lines.push('function solve(inputData) {')
+      pushNodeLines('  ')
+      lines.push('  return null;')
+      lines.push('}')
+    }
+
+    return { code: `${lines.join('\n')}\n`, syncMap: map }
+  }
+
+  const buildBlueprintCommentScaffold = (text: string, currentLanguage = language) => {
+    const parsedSteps = buildLogicStepsFromEnglish(text)
+    const comment = getCommentPrefix(currentLanguage)
+    const map: SyncMap = {}
+    const commentLines = parsedSteps.map((step, index) => {
+      const lineNumber = index + 1
+      map[step.step_number] = {
+        startLine: lineNumber,
+        endLine: lineNumber,
+        commentLine: lineNumber,
+        implementationStartLine: lineNumber,
+        implementationEndLine: lineNumber
+      }
+
+      return `${comment} Step ${lineNumber}: ${step.description}`
+    })
+
+    return {
+      code: commentLines.join('\n'),
+      syncMap: map
     }
   }
 
-  const summarizeTraceState = (step: ExecutionTraceStep) => {
-    const detailParts = []
-    const entries = Object.entries(step.variablesState || {}).filter(([key]) => (
-      !['stage', 'flowAction', 'iteration', 'systemOutput', 'purpose', 'sourceStep'].includes(key)
+  const stripBlueprintCommentScaffold = (currentCode: string) => {
+    const lines = currentCode.split('\n')
+    let index = 0
+
+    while (/^\s*(\/\/|#)\s*Step\s+\d+:/i.test(lines[index] || '')) {
+      index += 1
+    }
+
+    if (index > 0 && !String(lines[index] || '').trim()) {
+      index += 1
+    }
+
+    return lines.slice(index).join('\n').replace(/^\n+/, '')
+  }
+
+  const restoreGhostComments = (nextCode: string) => {
+    return nextCode
+  }
+
+  const getImplementationForNode = (nodeId: number, currentCode = code) => {
+    const range = syncMap[nodeId]
+    if (!range) return ''
+    const lines = currentCode.split('\n')
+    const start = Math.max(range.implementationStartLine - 1, 0)
+    const laterRanges = Object.values(syncMap)
+      .map((item) => item.implementationStartLine - 1)
+      .filter((line) => line > start)
+      .sort((a, b) => a - b)
+    const end = laterRanges[0] ?? Math.min(start + 3, lines.length)
+    return lines.slice(start, end).join('\n').trim()
+  }
+
+  const detectsNodeDeviation = (node: LogicNode, implementation: string) => {
+    const nodeText = `${node.text} ${node.starterComment}`.toLowerCase()
+    const codeText = implementation.replace(/\s+/g, '').toLowerCase()
+    const asksDescending = /\b(descending|largest|higher|highest|most frequent|larger value|value descending)\b/.test(nodeText)
+    const asksAscending = /\b(ascending|smallest|lower|lowest|smaller value|value ascending)\b/.test(nodeText)
+    const sortAscending = /\.sort\(\(?a,b\)?=>a-b\)/.test(codeText) || /\.sort\(function\(a,b\)\{returna-b/.test(codeText)
+    const sortDescending = /\.sort\(\(?a,b\)?=>b-a\)/.test(codeText) || /\.sort\(function\(a,b\)\{returnb-a/.test(codeText)
+
+    if (asksDescending && sortAscending && !/\|\||frequency|freq|count/.test(codeText)) return true
+    if (asksAscending && sortDescending) return true
+    return false
+  }
+
+  const estimateComplexity = (text: string, currentCode: string) => {
+    const source = `${text}\n${currentCode}`.toLowerCase()
+    const nestedLoop = /\b(nested loop|loop inside|for each.*for each)\b/.test(source) || /\b(for|while)\b[\s\S]{0,220}\b(for|while)\b/.test(source)
+    const hasSort = /\b(sort|sorted|priority queue|heap)\b/.test(source)
+    const hasLoop = /\b(loop|iterate|for each|traverse|for\b|while\b)\b/.test(source)
+    const hasMap = /\b(map|hash|set|dictionary|frequency|count)\b/.test(source)
+    const hasMatrix = /\b(grid|matrix|2d|rows.*columns)\b/.test(source)
+
+    if (nestedLoop || hasMatrix) return { time: 'O(n^2)', space: hasMap ? 'O(n)' : 'O(1)' }
+    if (hasSort) return { time: 'O(n log n)', space: hasMap ? 'O(n)' : 'O(log n)' }
+    if (hasLoop || hasMap) return { time: 'O(n)', space: hasMap ? 'O(n)' : 'O(1)' }
+    return { time: 'O(?)', space: 'O(?)' }
+  }
+
+  const getFeedbackForNode = (nodeId: number) => {
+    const matches = logicValidation?.feedback_nodes?.filter((node) => node.id === nodeId) || []
+    if (matches.length === 0) return null
+
+    const status: LogicFeedbackNode['status'] = matches.some((node) => node.status === 'error')
+      ? 'error'
+      : matches.some((node) => node.status === 'warning')
+        ? 'warning'
+        : 'correct'
+
+    return {
+      status,
+      message: matches.map((node) => node.message).join(' ')
+    }
+  }
+
+  const getFlowNodeStatus = (step: LogicStep): FlowNodeStatus => {
+    const feedback = getFeedbackForNode(step.step_number)
+    if (feedback?.status) return feedback.status
+    if (step.isValid === false) return 'error'
+    if (/\bnested loop|loop inside|for each.*for each\b/i.test(step.description) && /10\^?5|100000|≤\s*10⁵|<=\s*10\^5/i.test(problem?.constraints || '')) return 'error'
+    if (/\bsort\b/i.test(step.description) && !/\b(frequency|value|ascending|descending|tie|same|by|based on)\b/i.test(step.description)) return 'warning'
+    if (logicValidation?.overall_status === 'valid') return 'correct'
+    return 'idle'
+  }
+
+  const handleFlowNodeClick = (step: LogicStep) => {
+    setFocusedNodeId(step.step_number)
+    const range = syncMap[step.step_number]
+    if (range && editorInstance) {
+      editorInstance.revealLineInCenter(range.commentLine)
+      editorInstance.setPosition({ lineNumber: range.implementationStartLine, column: 1 })
+      editorInstance.focus()
+    }
+  }
+
+  const hasBlockingLogicError = () => (
+    logicInsights.some((insight) => insight.type === 'error') ||
+    Boolean(logicValidation?.feedback_nodes?.some((node) => node.status === 'error'))
+  )
+
+  const hasCriticalMismatchError = () => (
+    logicInsights.some((insight) => /critical mismatch/i.test(insight.message)) ||
+    Boolean(logicValidation?.feedback_nodes?.some((node) => /critical mismatch/i.test(node.message)))
+  )
+
+  const getLogicSuggestionMessage = () => {
+    if (!logicValidation && !nodes.some((node) => node.isValid === false)) return ''
+    if (logicValidation?.overall_status === 'valid' && !nodes.some((node) => node.isValid === false)) return ''
+
+    const suggestion = logicValidation?.feedback_nodes?.find((node) => (
+      node.status === 'warning' &&
+      /\b(equal|same frequency|tie|tie-breaker|edge case|empty)\b/i.test(node.message)
     ))
 
-    if (entries.length > 0) {
-      detailParts.push(entries.map(([key, value]) => `${key} = ${formatTraceValue(value)}`).join(', '))
-    }
-
-    if (step.conditionResult !== null && step.conditionResult !== undefined) {
-      detailParts.push(`Condition: ${step.conditionResult ? 'TRUE' : 'FALSE'}`)
-    }
-
-    if (step.flowAction) {
-      detailParts.push(step.flowAction)
-    }
-
-    if (step.systemOutput !== undefined && step.systemOutput !== null) {
-      detailParts.push(`Output: ${formatTraceValue(step.systemOutput)}`)
-    }
-
-    return detailParts.length > 0 ? detailParts.join(' | ') : 'State recorded for this step'
+    return suggestion?.message || nodes.find((node) => node.isValid === false)?.error || ''
   }
 
-  const getExecutionOverviewRows = () => {
-    const seen = new Set<string>()
-
-    return executionSteps
-      .filter((step) => {
-        if (!step.stage || seen.has(step.stage)) return false
-        seen.add(step.stage)
-        return true
-      })
-      .map((step) => ({
-        stage: step.stage,
-        whatHappens: step.stepDescription,
-        systemDisplay: summarizeTraceState(step),
-        purpose: step.purpose || 'Help the learner understand how the logic progresses.'
-      }))
+  const syncBlueprintHighlightScroll = () => {
+    if (!blueprintTextareaRef.current || !blueprintHighlightRef.current) return
+    blueprintHighlightRef.current.scrollTop = blueprintTextareaRef.current.scrollTop
+    blueprintHighlightRef.current.scrollLeft = blueprintTextareaRef.current.scrollLeft
   }
 
-  const handleSubmitLogic = async () => {
-    if (logicSteps.some(step => !step.description.trim())) {
-      alert('Please fill in all logic steps')
+  const handleEnglishLogicChange = (value: string) => {
+    const nextSteps = buildLogicStepsFromEnglish(value)
+    const optimisticNodes = nextSteps.map((step) => ({
+      id: step.step_number,
+      text: step.description,
+      type: step.type ? step.type.charAt(0).toUpperCase() + step.type.slice(1) : 'Process',
+      isValid: null,
+      complexity: step.complexity || 'O(?)',
+      starterComment: step.description,
+      error: null
+    }))
+
+    setEnglishLogic(value)
+    setNodes(optimisticNodes)
+    setLogicValidation(null)
+    setLogicInsights([])
+    setValidatingLogic(Boolean(value.trim()))
+  }
+
+  useEffect(() => {
+    if (!englishLogic.trim()) {
+      setSyncMap({})
       return
     }
 
-    setSubmitting(true)
-    try {
-      const response = await api.post('/submissions/logic', {
-        problemId,
-        logicSteps: logicSteps.map(({ step_number, ...rest }) => rest),
-      })
-      setSubmission(response.data.submission)
-      setExecutionSteps(response.data.executionSteps || [])
-      setCurrentExecutionIndex(0)
-      fetchSubmissionHistory()
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to submit logic')
-    } finally {
-      setSubmitting(false)
+    const generated = buildBlueprintCommentScaffold(englishLogic, language)
+    setSyncMap(generated.syncMap)
+    setCode((prev) => {
+      const body = stripBlueprintCommentScaffold(prev)
+      const starterBody = buildStarterCode(problem, language)
+      const nextBody = body.trim() ? body.trimStart() : starterBody
+      const nextCode = `${generated.code}\n\n${nextBody.trimEnd()}\n`
+
+      lastBlueprintRef.current = nextCode
+      return nextCode
+    })
+  }, [englishLogic, language, problem])
+
+  useSyncLogic({
+    enabled: !isCompetitionMode,
+    logicText: englishLogic,
+    problem,
+    language,
+    parseRequestRef,
+    normalizeParsedNodes,
+    setNodes,
+    setSyncMap,
+    setParsingLogic
+  })
+
+  useEffect(() => {
+    if (isCompetitionMode) return
+
+    const trimmedLogic = englishLogic.trim()
+    const requestId = validationRequestRef.current + 1
+    validationRequestRef.current = requestId
+
+    if (!trimmedLogic || !problem) {
+      setLogicInsights([])
+      setLogicValidation(null)
+      setValidatingLogic(false)
+      return
     }
-  }
+
+    setValidatingLogic(true)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await api.post('/validateLogicAgainstProblem', {
+          userBlueprintText: englishLogic,
+          problem: {
+            title: problem?.title,
+            description: problem?.description,
+            constraints: problem?.constraints,
+            examples: problem?.examples
+          }
+        })
+
+        if (validationRequestRef.current !== requestId) return
+
+        const insights = normalizeLogicInsights(response.data)
+        setLogicInsights(insights)
+        setLogicValidation(buildLogicValidationFromInsights(insights))
+      } catch (error) {
+        console.error('Logic validation failed:', error)
+        if (validationRequestRef.current === requestId) {
+          setLogicInsights([])
+          setLogicValidation(null)
+        }
+      } finally {
+        if (validationRequestRef.current === requestId) {
+          setValidatingLogic(false)
+        }
+      }
+    }, 650)
+
+    return () => window.clearTimeout(timer)
+  }, [englishLogic, problem, isCompetitionMode])
+
+  useEffect(() => {
+    if (!englishLogic.trim() || typeof window === 'undefined') {
+      setComplexityToast('')
+      return
+    }
+
+    const payload = {
+      logic: englishLogic,
+      constraints: problem?.constraints || ''
+    }
+
+    const runFallback = () => {
+      const hasNestedLoop = /\bnested loop|loop inside|for each.*for each\b/i.test(payload.logic)
+      const hasLargeConstraint = /10\^?5|100000|≤\s*10⁵|<=\s*10\^5/i.test(payload.constraints)
+      setComplexityToast(hasNestedLoop && hasLargeConstraint
+        ? 'Complexity Mismatch: nested loop logic may time out for constraints near 10^5.'
+        : '')
+    }
+
+    if (!window.Worker) {
+      runFallback()
+      return
+    }
+
+    const workerSource = `
+      self.onmessage = function(event) {
+        const logic = String(event.data.logic || '');
+        const constraints = String(event.data.constraints || '');
+        const hasNestedLoop = /\\bnested loop|loop inside|for each.*for each\\b/i.test(logic);
+        const hasLargeConstraint = /10\\^?5|100000|≤\\s*10⁵|<=\\s*10\\^5/i.test(constraints);
+        self.postMessage({
+          message: hasNestedLoop && hasLargeConstraint
+            ? 'Complexity Mismatch: nested loop logic may time out for constraints near 10^5.'
+            : ''
+        });
+      };
+    `
+    const blob = new Blob([workerSource], { type: 'application/javascript' })
+    const worker = new Worker(URL.createObjectURL(blob))
+    worker.onmessage = (event) => {
+      setComplexityToast(event.data?.message || '')
+    }
+    worker.postMessage(payload)
+
+    return () => worker.terminate()
+  }, [englishLogic, problem?.constraints])
 
   const validateCodeSyntax = (codeValue: string) => {
     // Only validate JavaScript code
@@ -500,8 +1396,39 @@ export default function ProblemDetailPage() {
   }
 
   const handleCodeChange = (value: string | undefined) => {
-    const newCode = value || ''
+    const newCode = restoreGhostComments(value || '')
     setCode(newCode)
+    const lineCount = newCode.split('\n').length
+    const nextSyncMap = Object.fromEntries(
+      Object.entries(syncMap).filter(([, range]) => range.implementationStartLine <= lineCount)
+    ) as SyncMap
+    if (Object.keys(nextSyncMap).length !== Object.keys(syncMap).length) {
+      setSyncMap(nextSyncMap)
+    }
+
+    const nextImplementedIds = nodes
+      .filter((node) => getImplementationForNode(node.id, newCode).length > 0)
+      .map((node) => node.id)
+    setImplementedNodeIds(nextImplementedIds)
+
+    nodes.forEach((node) => {
+      const implementation = getImplementationForNode(node.id, newCode)
+      if (!implementation) {
+        if (node.error?.startsWith('Code deviation:')) {
+          updateNode(node.id, { isValid: null, error: null })
+        }
+        return
+      }
+
+      if (detectsNodeDeviation(node, implementation)) {
+        updateNode(node.id, {
+          isValid: false,
+          error: 'Code deviation: implementation appears to contradict this logic node.'
+        })
+      } else if (node.error?.startsWith('Code deviation:')) {
+        updateNode(node.id, { isValid: true, error: null })
+      }
+    })
     
     // Debounce syntax validation only for JavaScript
     if (newCode.trim() && language === 'javascript') {
@@ -514,6 +1441,11 @@ export default function ProblemDetailPage() {
   const handleSubmitCode = async () => {
     if (!code.trim()) {
       alert('Please write some code')
+      return
+    }
+
+    if (hasCriticalMismatchError()) {
+      alert('Fix the Critical Mismatch in the Logic Auditor before submitting code.')
       return
     }
 
@@ -537,22 +1469,13 @@ export default function ProblemDetailPage() {
         problemId,
         code,
         language: language,
-        logicSubmissionId: submission?.id,
+        logicSubmissionId: null,
       })
       
       console.log('Submission response:', response.data)
       
       setCodeSubmission(response.data.submission)
       fetchSubmissionHistory()
-      
-      // Show success/failure message
-      if (response.data.submission.status === 'correct') {
-        alert('✓ All test cases passed!')
-      } else if (response.data.submission.status === 'partially_correct') {
-        alert(`⚠ ${response.data.submission.passedCount}/${response.data.submission.totalCount} test cases passed`)
-      } else {
-        alert('✗ Test cases failed. Check the results below for details.')
-      }
     } catch (error: any) {
       console.error('Code submission error:', error)
       
@@ -568,18 +1491,18 @@ export default function ProblemDetailPage() {
         errorMsg = error.message
       }
       
-      alert('✗ ' + errorMsg)
       console.log('Full error details:', error.response?.data)
-      
-      // If there's a detailed error, show it in the UI
-      if (error.response?.data) {
-        setCodeSubmission({
-          status: 'error',
-          error: errorMsg,
-          results: [],
-          message: errorMsg
-        })
-      }
+      setCodeSubmission(error.response?.data?.submission || {
+        status: 'error',
+        error: errorMsg,
+        errorDetails: error.response?.data?.details || error.response?.data?.errorDetails || {
+          title: 'Request Error',
+          message: errorMsg,
+          raw: errorMsg
+        },
+        results: [],
+        message: errorMsg
+      })
     } finally {
       setSubmitting(false)
     }
@@ -615,9 +1538,10 @@ export default function ProblemDetailPage() {
       })
       setCustomRunResult(response.data.result)
     } catch (error: any) {
-      setCustomRunResult({
+      setCustomRunResult(error.response?.data?.result || {
         passed: false,
         error: error.response?.data?.error || 'Failed to run custom test',
+        errorDetails: error.response?.data?.details || error.response?.data?.errorDetails || null,
         expectedOutput: parsedExpected.value,
         actualOutput: null,
         input: parsedInput.value
@@ -678,6 +1602,14 @@ export default function ProblemDetailPage() {
       // Simulate AI suggestion - In production, this would call an AI API
       const suggestions = generateAISuggestion(problem)
       setAiSuggestion(suggestions)
+      const logicDraft = suggestions
+        .split('\n')
+        .filter((line) => /^\d+\./.test(line.trim()))
+        .map((line) => line.replace(/^\d+\.\s*/, '').replace(/\*\*/g, '').replace(/:/g, ' -'))
+        .join('\n')
+      if (logicDraft) {
+        handleEnglishLogicChange(logicDraft)
+      }
     } catch (error) {
       console.error('Failed to get AI suggestion:', error)
       setAiSuggestion('Unable to generate suggestion at this time. Please try again.')
@@ -790,9 +1722,76 @@ export default function ProblemDetailPage() {
         return <FaExclamationTriangle size={24} />
       case 'incorrect':
         return <FaTimesCircle size={24} />
+      case 'error':
+        return <FaExclamationTriangle size={24} />
       default:
         return null
     }
+  }
+
+  const formatExecutionTime = (value: any) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return '--'
+    return `${numericValue}ms`
+  }
+
+  const renderCompilerDiagnostic = (diagnostic: any, compact = false) => {
+    if (!diagnostic) return null
+
+    const rawText = getDiagnosticRawText(diagnostic)
+    const phaseLabel = String(diagnostic.phase || 'runtime').replace(/_/g, ' ')
+    const codeFrame = Array.isArray(diagnostic.codeFrame) ? diagnostic.codeFrame : []
+
+    return (
+      <div className={`compiler-diagnostic-panel ${compact ? 'compact' : ''}`}>
+        <div className="compiler-diagnostic-header">
+          <div>
+            <span className="compiler-diagnostic-eyebrow">{phaseLabel}</span>
+            <h4>{diagnostic.title || 'Execution Error'}</h4>
+          </div>
+          {diagnostic.lineNumber ? (
+            <span className="compiler-diagnostic-location">
+              Ln {diagnostic.lineNumber}{diagnostic.columnNumber ? `, Col ${diagnostic.columnNumber}` : ''}
+            </span>
+          ) : null}
+        </div>
+
+        <p className="compiler-diagnostic-message">
+          {diagnostic.message || diagnostic.fallbackError || 'The program failed while running.'}
+        </p>
+
+        {rawText && rawText !== diagnostic.message ? (
+          <pre className="compiler-diagnostic-output">{rawText}</pre>
+        ) : null}
+
+        {codeFrame.length > 0 ? (
+          <div className="compiler-code-frame">
+            {codeFrame.map((frameLine: any) => (
+              <div
+                key={frameLine.lineNumber}
+                className={`compiler-code-frame-line ${frameLine.highlight ? 'active' : ''}`}
+              >
+                <span>{frameLine.lineNumber}</span>
+                <code>{frameLine.content || ' '}</code>
+              </div>
+            ))}
+          </div>
+        ) : diagnostic.errorLine ? (
+          <div className="compiler-code-frame">
+            <div className="compiler-code-frame-line active">
+              <span>{diagnostic.lineNumber || '!'}</span>
+              <code>{diagnostic.errorLine}</code>
+            </div>
+          </div>
+        ) : null}
+
+        {diagnostic.suggestion ? (
+          <div className="compiler-diagnostic-suggestion">
+            {diagnostic.suggestion}
+          </div>
+        ) : null}
+      </div>
+    )
   }
 
   if (loading) {
@@ -811,12 +1810,193 @@ export default function ProblemDetailPage() {
     router.push('/login')
   }
 
-  const currentExecutionStep = executionSteps[currentExecutionIndex] || null
-  const executionOverviewRows = getExecutionOverviewRows()
+  const complexityEstimate = estimateComplexity(englishLogic, code)
+  const logicBlockerActive = hasBlockingLogicError()
+  const criticalMismatchActive = hasCriticalMismatchError()
+  const logicSuggestionMessage = getLogicSuggestionMessage()
+  const submissionDiagnostic = getPrimaryExecutionDiagnostic(codeSubmission)
+  const problemPaneVisible = !focusMode && showQuestionPane
+  const blueprintPaneVisible = !isCompetitionMode && showBlueprintPane
+  const blueprintLines = englishLogic.length > 0 ? englishLogic.split('\n') : ['']
+  const logicInsightTypeByLine = logicInsights.reduce<Record<number, LogicInsight['type']>>((acc, insight) => {
+    const current = acc[insight.line]
+    if (!current || LOGIC_INSIGHT_SEVERITY[insight.type] > LOGIC_INSIGHT_SEVERITY[current]) {
+      acc[insight.line] = insight.type
+    }
+    return acc
+  }, {})
+  const logicValidationDisplayStatus = validatingLogic
+    ? 'idle'
+    : logicInsights.some((insight) => insight.type === 'error')
+    ? 'incorrect'
+    : logicInsights.some((insight) => insight.type === 'warning') || Boolean(complexityToast)
+      ? 'warning'
+    : englishLogic.trim() && !parsingLogic
+      ? 'correct'
+      : 'idle'
+  const executionTraceAvailable = !isCompetitionMode && logicValidationDisplayStatus === 'correct'
+  const executionTraceBlueprintSteps = englishLogic
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const formatExecutionTraceValue = (value: any, fallback: string) => {
+    if (value === null || value === undefined) return fallback
 
+    if (typeof value === 'string') {
+      const trimmedValue = value.trim()
+      if (!trimmedValue) return fallback
+
+      try {
+        return JSON.stringify(JSON.parse(trimmedValue), null, 2)
+      } catch {
+        return trimmedValue
+      }
+    }
+
+    return JSON.stringify(value, null, 2) || fallback
+  }
+  const executionTraceSampleInput = getProblemSampleInput(problem)
+  const executionTraceSampleOutput = getProblemSampleOutput(problem)
+  const executionTraceSampleInputText = executionTraceSampleInput !== null
+    ? formatExecutionTraceValue(executionTraceSampleInput, 'No sample input available.')
+    : 'No sample input available.'
+  const executionTraceSampleOutputText = executionTraceSampleOutput !== null
+    ? formatExecutionTraceValue(executionTraceSampleOutput, 'No expected output available.')
+    : 'No expected output available.'
+  const executionTraceExplanationRows = [
+    {
+      step: '1',
+      stage: 'Input Initialization',
+      happens: 'System takes test input and initializes variables.',
+      display: 'Displays initial values from the selected sample input.',
+      purpose: 'To start execution with defined values.'
+    },
+    {
+      step: '2',
+      stage: 'Step Execution',
+      happens: 'Each Blueprint step is executed one by one.',
+      display: 'Shows the current step and updated variable values.',
+      purpose: 'To track how logic progresses.'
+    },
+    {
+      step: '3',
+      stage: 'Condition Evaluation',
+      happens: 'Conditions from if/else or loops are checked.',
+      display: 'Displays condition result as TRUE or FALSE.',
+      purpose: 'To understand decision making.'
+    },
+    {
+      step: '4',
+      stage: 'Control Flow Movement',
+      happens: 'Execution moves based on branch or loop results.',
+      display: 'Highlights the path taken, such as enter loop or skip block.',
+      purpose: 'To visualize program flow.'
+    },
+    {
+      step: '5',
+      stage: 'Iteration Handling',
+      happens: 'Loop execution is repeated for each iteration.',
+      display: 'Shows iteration-wise variable updates.',
+      purpose: 'To analyze repeated execution.'
+    },
+    {
+      step: '6',
+      stage: 'Variable State Tracking',
+      happens: 'Variable values are updated and tracked after steps.',
+      display: 'Displays updated values after each meaningful change.',
+      purpose: 'To debug logic errors.'
+    },
+    {
+      step: '7',
+      stage: 'Execution Navigation',
+      happens: 'Learner can inspect the trace step by step.',
+      display: 'Step navigation controls and ordered rows.',
+      purpose: 'To analyze execution step-by-step.'
+    },
+    {
+      step: '8',
+      stage: 'Final Output Generation',
+      happens: 'Final result is computed after execution completes.',
+      display: 'Displays final output and expected output.',
+      purpose: 'To verify correctness.'
+    }
+  ]
+  const executionTraceExampleRows = [
+    {
+      step: '1',
+      action: 'Load sample input',
+      variables: executionTraceSampleInputText,
+      output: '-'
+    },
+    ...executionTraceBlueprintSteps.map((step, index) => ({
+      step: String(index + 2),
+      action: step,
+      variables: /for|while|loop|iterate|each/i.test(step)
+        ? 'Iteration state is tracked for this step.'
+        : 'Variables update according to this Blueprint step.',
+      output: /if|else|condition|when|while|for/i.test(step)
+        ? 'Condition / control flow evaluated'
+        : '-'
+    })),
+    {
+      step: String(executionTraceBlueprintSteps.length + 2),
+      action: 'Final output',
+      variables: 'Final variable state',
+      output: executionTraceSampleOutputText
+    }
+  ]
+  const logicFailureNodes = logicValidation?.overall_status === 'valid'
+    ? nodes.filter((node) => node.isValid === false).map((node) => ({
+        id: node.id,
+        status: 'error' as const,
+        message: node.error || 'Code deviates from this logic node.'
+      }))
+    : [
+        ...(logicValidation?.feedback_nodes?.filter((node) => node.status !== 'correct') || []),
+        ...nodes.filter((node) => node.isValid === false && node.error).map((node) => ({
+          id: node.id,
+          status: 'error' as const,
+          message: node.error || 'Code deviates from this logic node.'
+        }))
+      ]
+  const auditProblemText = `${problem?.title || ''} ${problem?.description || ''}`.toLowerCase()
+  const auditLogicText = englishLogic.toLowerCase()
+  const auditHasError = logicInsights.some((insight) => insight.type === 'error')
+  const auditHasWarning = logicInsights.some((insight) => insight.type === 'warning') || Boolean(complexityToast)
+  const blueprintPulseStatus = validatingLogic
+    ? 'analyzing'
+    : !englishLogic.trim()
+      ? 'idle'
+      : auditHasError
+        ? 'error'
+        : auditHasWarning
+          ? 'warning'
+          : 'valid'
+  const positiveAuditInsights: LogicInsight[] = [
+    ...(/\bdigit product\b|\bproduct of (their )?digits\b/.test(auditProblemText) && /\bdigit product\b|\bproduct of (the )?digits\b|multiply.*digits|digits.*product/.test(auditLogicText)
+      ? [{ line: 1, type: 'info' as const, message: 'Digit product calculation identified.' }]
+      : []),
+    ...(/\bfrequency|most frequent|same frequency|equal frequency\b/.test(auditProblemText) && /\bfrequency|freq|count|map|dictionary\b/.test(auditLogicText)
+      ? [{ line: 1, type: 'info' as const, message: 'Frequency counting step identified.' }]
+      : []),
+    ...(/\bsort|order\b/.test(auditLogicText)
+      ? [{ line: 1, type: 'info' as const, message: 'Sorting step identified; comparator is being audited against the problem.' }]
+      : [])
+  ]
+  const hasCriticalAuditorMismatch = logicInsights.some(isCriticalMismatchInsight)
+  const auditorInsights: LogicInsight[] = !englishLogic.trim()
+    ? [{ line: 1, type: 'warning', message: 'Start with a Blueprint that describes the algorithm for this exact problem.' }]
+    : compactAuditorInsights([
+        ...(hasCriticalAuditorMismatch ? [] : positiveAuditInsights),
+        ...logicInsights,
+        ...(complexityToast ? [{ line: 1, type: 'warning' as const, message: complexityToast }] : []),
+        ...(!validatingLogic && logicInsights.length === 0 && positiveAuditInsights.length === 0
+          ? [{ line: 1, type: 'info' as const, message: 'No requirement mismatch detected yet.' }]
+          : [])
+      ])
   return (
     <ProtectedRoute>
-      <div className="problem-detail-container">
+      <div className={`problem-detail-container problem-theme-${programmingTheme}`}>
         <nav className={`problem-navbar ${isCompetitionMode ? 'competition-problem-navbar' : ''}`}>
           <div className="problem-navbar-content">
             <div className="problem-brand" onClick={() => router.push('/dashboard')}>
@@ -826,6 +2006,52 @@ export default function ProblemDetailPage() {
               <span className="problem-brand-text">ThinkFlow</span>
             </div>
             <div className="problem-navbar-actions">
+              <div className="programming-layout-controls" aria-label="Programming layout controls">
+                <button
+                  type="button"
+                  className="programming-control-btn"
+                  onClick={() => setProgrammingTheme((current) => current === 'dark' ? 'light' : 'dark')}
+                  aria-pressed={programmingTheme === 'light'}
+                  title={`Switch to ${programmingTheme === 'dark' ? 'light' : 'dark'} mode`}
+                >
+                  {programmingTheme === 'dark' ? <FaSun /> : <FaMoon />}
+                  {programmingTheme === 'dark' ? 'Light' : 'Dark'}
+                </button>
+                {executionTraceAvailable ? (
+                  <button
+                    type="button"
+                    className="programming-control-btn execution-trace-trigger active"
+                    onClick={() => setShowExecutionTrace(true)}
+                    title="Open Execution Trace"
+                    aria-label="Open Execution Trace"
+                  >
+                    <FaInfoCircle />
+                    Trace
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={`programming-control-btn ${showQuestionPane ? 'active' : ''}`}
+                  onClick={() => setShowQuestionPane((current) => !current)}
+                  aria-pressed={showQuestionPane}
+                  title={showQuestionPane ? 'Hide question pane' : 'Show question pane'}
+                >
+                  {showQuestionPane ? <FaEye /> : <FaEyeSlash />}
+                  Question
+                </button>
+                {!isCompetitionMode ? (
+                  <button
+                    type="button"
+                    className={`programming-control-btn ${showBlueprintPane ? 'active' : ''}`}
+                    onClick={() => setShowBlueprintPane((current) => !current)}
+                    aria-pressed={showBlueprintPane}
+                    title={showBlueprintPane ? 'Hide English Blueprint pane' : 'Show English Blueprint pane'}
+                  >
+                    {showBlueprintPane ? <FaEye /> : <FaEyeSlash />}
+                    Blueprint
+                  </button>
+                ) : null}
+              </div>
               <button onClick={() => router.push(isCompetitionMode ? '/competitions' : '/problems')} className="problem-back-btn">
                 <FaArrowLeft /> {isCompetitionMode ? 'Back to Competitions' : 'Back to Problems'}
               </button>
@@ -846,7 +2072,7 @@ export default function ProblemDetailPage() {
             <div className="competition-toolbar-actions">
               <select 
                 value={language} 
-                onChange={(e) => setLanguage(e.target.value)}
+                onChange={(e) => handleLanguageChange(e.target.value)}
                 className="language-selector competition-language-selector"
               >
                 <option value="javascript">JavaScript</option>
@@ -866,13 +2092,113 @@ export default function ProblemDetailPage() {
           </div>
         ) : null}
 
-        <div className={`problem-content ${isCompetitionMode ? 'competition-workspace' : ''}`}>
+        {showExecutionTrace && executionTraceAvailable ? (
+          <div className="execution-trace-backdrop" role="dialog" aria-modal="true" aria-labelledby="execution-trace-title">
+            <div className="execution-trace-modal">
+              <div className="execution-trace-header">
+                <div>
+                  <span className="execution-trace-eyebrow">Validated Blueprint</span>
+                  <h2 id="execution-trace-title">Execution Trace</h2>
+                </div>
+                <button
+                  type="button"
+                  className="execution-trace-close"
+                  onClick={() => setShowExecutionTrace(false)}
+                  aria-label="Close Execution Trace"
+                >
+                  ×
+                </button>
+              </div>
+
+              <p className="execution-trace-summary">
+                Execution Trace shows what happens inside your logic when it runs: step order, variable state, condition results, control flow, loop iterations, and final output.
+              </p>
+
+              <div className="execution-trace-table-section">
+                <h3>Execution Trace - Tabular Explanation</h3>
+                <div className="execution-trace-table-wrap">
+                  <table className="execution-trace-table">
+                    <thead>
+                      <tr>
+                        <th>Step No.</th>
+                        <th>Execution Stage</th>
+                        <th>What Happens</th>
+                        <th>System Output / Display</th>
+                        <th>Purpose</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {executionTraceExplanationRows.map((row) => (
+                        <tr key={`trace-explain-${row.step}`}>
+                          <td>{row.step}</td>
+                          <td>{row.stage}</td>
+                          <td>{row.happens}</td>
+                          <td>{row.display}</td>
+                          <td>{row.purpose}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="execution-trace-table-section">
+                <h3>Example Table - Sample Execution Trace</h3>
+                <p className="execution-trace-table-caption">
+                  Problem: {problem?.title || 'Current problem'}
+                </p>
+                <div className="execution-trace-table-wrap">
+                  <table className="execution-trace-table sample">
+                    <thead>
+                      <tr>
+                        <th>Step</th>
+                        <th>Action</th>
+                        <th>Variable State</th>
+                        <th>Output / Condition</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {executionTraceExampleRows.map((row) => (
+                        <tr key={`trace-sample-${row.step}-${row.action}`}>
+                          <td>{row.step}</td>
+                          <td>{row.action}</td>
+                          <td>
+                            <pre>{row.variables}</pre>
+                          </td>
+                          <td>
+                            <pre>{row.output}</pre>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="execution-trace-note">
+                Use this to catch skipped branches, wrong loop exits, incorrect variable updates, and conditions that evaluate the opposite way from what you intended.
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className={`problem-content ${isCompetitionMode ? 'competition-workspace' : ''} ${focusMode ? 'focus-mode' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${!problemPaneVisible ? 'question-hidden' : ''} ${!blueprintPaneVisible ? 'blueprint-hidden' : ''}`}>
+          {problemPaneVisible ? (
           <div className={`problem-panel ${isCompetitionMode ? 'competition-problem-panel' : ''}`}>
             {isCompetitionMode ? (
               <div className="competition-tabs">
                 <button className="competition-tab active">Description</button>
                 <button className="competition-tab">Submissions</button>
               </div>
+            ) : null}
+            {!isCompetitionMode ? (
+              <button
+                type="button"
+                className="sidebar-collapse-toggle"
+                onClick={() => setSidebarCollapsed((prev) => !prev)}
+              >
+                {sidebarCollapsed ? 'Show Problem' : 'Collapse Problem'}
+              </button>
             ) : null}
             <div className="problem-header">
               <div className="problem-title-row">
@@ -889,7 +2215,7 @@ export default function ProblemDetailPage() {
               ) : null}
             </div>
 
-            <div className="problem-section">
+            <div className="problem-section problem-description-section">
               <p className="problem-description">{problem?.description}</p>
             </div>
 
@@ -924,19 +2250,25 @@ export default function ProblemDetailPage() {
               </div>
             )}
           </div>
+          ) : null}
 
           <div className={`solution-panel ${isCompetitionMode ? 'competition-solution-panel' : ''}`}>
             <div className="solution-header">
-              <h2 className="solution-title">{isCompetitionMode ? 'Code Editor' : 'Solution Logic'}</h2>
+              <h2 className="solution-title">{isCompetitionMode ? 'Code Editor' : 'Logic Engine'}</h2>
               <p className="solution-subtitle">
                 {isCompetitionMode
                   ? 'Write, test, and submit your solution in a focused contest workspace.'
-                  : 'Break down your solution into structured steps. Be specific about what each step does.'}
+                  : 'Use the Blueprint as the source of truth. ThinkFlow syncs nodes into editor ghost hints.'}
               </p>
               <div className="draft-status-row">
                 <span className="draft-status-text">
                   Draft autosave: {draftSavedAt ? `saved at ${draftSavedAt}` : 'waiting for your first edit'}
                 </span>
+                {!isCompetitionMode ? (
+                  <button type="button" onClick={() => setFocusMode((prev) => !prev)} className="draft-clear-btn">
+                    {focusMode ? 'Exit Focus' : 'Focus Mode'}
+                  </button>
+                ) : null}
                 <button type="button" onClick={clearDraft} className="draft-clear-btn">
                   Clear Draft
                 </button>
@@ -960,7 +2292,7 @@ export default function ProblemDetailPage() {
               ) : null}
             </div>
 
-            {!isCompetitionMode && aiSuggestion && (
+            {!isCompetitionMode && !focusMode && aiSuggestion && (
               <div className="ai-suggestion-box">
                 <div className="ai-suggestion-header">
                   <span className="ai-badge"><FaRobot /> AI Assistant</span>
@@ -973,76 +2305,80 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            {!isCompetitionMode ? (
-            <div className="logic-steps-container">
-              {logicSteps.map((step, index) => (
-                <div key={index} className="logic-step">
-                  <div className="logic-step-header">
-                    <span className="logic-step-number">Step {step.step_number}</span>
-                    {logicSteps.length > 1 && (
-                      <button
-                        onClick={() => removeLogicStep(index)}
-                        className="logic-step-remove"
-                      >
-                        <FaTrash size={12} /> Remove
-                      </button>
-                    )}
+            {blueprintPaneVisible ? (
+              <div className={`english-blueprint-panel audit-${blueprintPulseStatus}`}>
+                <div className="english-blueprint-header">
+                  <div>
+                    <h3 className="problem-section-title">English-to-Code Blueprint</h3>
+                    <p className="english-blueprint-subtitle">
+                      Write your approach naturally. The editor below mirrors it as a live code skeleton, so you can move from thought to syntax without the old dropdown labels.
+                    </p>
                   </div>
-                  <select
-                    className="logic-step-select"
-                    value={step.type || 'process'}
-                    onChange={(e) => updateLogicStep(index, 'type', e.target.value)}
+                  <div className="complexity-pill">
+                    <span>Time {complexityEstimate.time}</span>
+                    <span>Space {complexityEstimate.space}</span>
+                  </div>
+                </div>
+                <div className="english-logic-editor-shell">
+                  <div
+                    ref={blueprintHighlightRef}
+                    className="english-logic-highlight-layer"
+                    aria-hidden="true"
                   >
-                    <option value="input">Input Processing</option>
-                    <option value="process">Processing</option>
-                    <option value="condition">Conditional Logic</option>
-                    <option value="loop">Loop/Iteration</option>
-                    <option value="output">Output</option>
-                  </select>
+                    {blueprintLines.map((line, index) => (
+                      <span
+                        key={`blueprint-highlight-${index}`}
+                        className={`english-logic-highlight-line ${logicInsightTypeByLine[index + 1] || ''}`}
+                      >
+                        {line || ' '}
+                      </span>
+                    ))}
+                  </div>
                   <textarea
-                    className="logic-step-textarea"
-                    value={step.description}
-                    onChange={(e) => updateLogicStep(index, 'description', e.target.value)}
-                    placeholder="Describe what this step does..."
+                    ref={blueprintTextareaRef}
+                    className={`english-logic-textarea ${logicInsights.length > 0 ? 'has-line-insights' : ''}`}
+                    value={englishLogic}
+                    onChange={(e) => handleEnglishLogicChange(e.target.value)}
+                    onScroll={syncBlueprintHighlightScroll}
+                    placeholder="Describe the exact algorithm for this problem. Keep it to one clear step per line."
                   />
                 </div>
-              ))}
-            </div>
-            ) : null}
-
-            {!isCompetitionMode ? (
-              <div className="action-buttons">
-                <button onClick={addLogicStep} className="btn btn-secondary">
-                  <FaPlus /> Add Step
-                </button>
-                <button onClick={getAISuggestion} disabled={loadingSuggestion} className="btn btn-ai">
-                  <FaLightbulb /> {loadingSuggestion ? 'Loading...' : 'Need Help?'}
-                </button>
-                <button
-                  onClick={handleSubmitLogic}
-                  disabled={submitting}
-                  className="btn btn-primary"
-                >
-                  {submitting ? 'Submitting...' : 'Submit Logic for Evaluation'}
-                </button>
-              </div>
-            ) : null}
-
-            {!isCompetitionMode && submission && (
-              <div className="submission-results">
-                <div className={`submission-status ${submission.status}`}>
-                  {getStatusIcon(submission.status)}
-                  <span>
-                    {submission.status === 'correct' && 'Correct Solution!'}
-                    {submission.status === 'partially_correct' && 'Partially Correct'}
-                    {submission.status === 'incorrect' && 'Incorrect Solution'}
+                <div className="logic-validation-row">
+                  <span className={`logic-validation-badge ${logicValidationDisplayStatus}`}>
+                    {parsingLogic
+                      ? 'Syncing...'
+                      : validatingLogic
+                        ? 'Analyzing...'
+                      : logicValidationDisplayStatus === 'correct'
+                        ? 'Correct'
+                        : logicValidationDisplayStatus === 'warning'
+                          ? 'Needs edge cases'
+                        : logicValidationDisplayStatus === 'incorrect'
+                          ? 'Incorrect'
+                          : 'Not validated yet'}
                   </span>
+                  {logicValidation?.source ? (
+                    <span className="logic-validation-source">Checked by {logicValidation.source}</span>
+                  ) : null}
+                  {parsingLogic ? (
+                    <span className="logic-validation-source">Parsing Blueprint...</span>
+                  ) : null}
                 </div>
-                {submission.feedback && (
-                  <div className="submission-feedback">{submission.feedback}</div>
-                )}
+                <div className="logic-auditor-panel">
+                  <div className="logic-auditor-title">Logic Auditor</div>
+                  <div className="logic-auditor-list">
+                    {auditorInsights.map((insight, index) => (
+                      <div className={`logic-auditor-item ${insight.type}`} key={`audit-${index}-${insight.message}`}>
+                        <span className="logic-auditor-icon">
+                          {insight.type === 'error' ? '❌' : insight.type === 'warning' ? '⚠️' : '✅'}
+                        </span>
+                        <span>{insight.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )}
+            ) : null}
 
             {(showCodeEditor || isCompetitionMode) && (
               <div className="code-editor-container">
@@ -1059,9 +2395,25 @@ export default function ProblemDetailPage() {
                         >
                           <FaRobot /> {analyzingCode ? 'Analyzing...' : 'Analyze Code'}
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleSubmitCode}
+                          disabled={submitting || criticalMismatchActive}
+                          className="code-submit-btn"
+                          title={criticalMismatchActive ? 'Resolve the Critical Mismatch in the Logic Auditor first.' : 'Submit code'}
+                        >
+                          {submitting ? 'Submitting...' : 'Submit Code'}
+                        </button>
+                        <button
+                          type="button"
+                          className="custom-json-toggle editor-test-toggle"
+                          onClick={() => setShowTestTray((prev) => !prev)}
+                        >
+                          {showTestTray ? 'Hide Tests' : 'Tests'}
+                        </button>
                         <select 
                           value={language} 
-                          onChange={(e) => setLanguage(e.target.value)}
+                          onChange={(e) => handleLanguageChange(e.target.value)}
                           className="language-selector"
                         >
                           <option value="javascript">JavaScript</option>
@@ -1081,29 +2433,13 @@ export default function ProblemDetailPage() {
                     )}
                   </div>
                 </div>
-                {!isCompetitionMode ? (
-                <div className="code-hints-panel">
-                  <div className="code-hints-title"><FaLightbulb /> Smart Hints</div>
-                  <div className="code-hints-list">
-                    {editorHints.map((hint, index) => (
-                      <div className="code-hint-card" key={`${hint.title}-${index}`}>
-                        <div className="code-hint-copy">
-                          <div className="code-hint-label">{hint.title}</div>
-                          <div className="code-hint-description">{hint.description}</div>
-                        </div>
-                        <button
-                          type="button"
-                          className="code-hint-insert-btn"
-                          onClick={() => insertHintSnippet(hint.snippet)}
-                        >
-                          Insert
-                        </button>
-                      </div>
-                    ))}
+                {!isCompetitionMode && logicBlockerActive ? (
+                  <div className="logic-code-warning">
+                    <FaExclamationTriangle />
+                    <span>Warning: Your logic has a conflict with the problem requirements. We recommend fixing your Blueprint before coding.</span>
                   </div>
-                </div>
                 ) : null}
-                {!isCompetitionMode && codeAnalysis && (
+                {!isCompetitionMode && !focusMode && codeAnalysis && (
                   <div className="code-analysis-panel">
                     <div className="code-analysis-title"><FaRobot /> Code Analysis Suggestions</div>
                     {codeAnalysis.source && (
@@ -1138,12 +2474,25 @@ export default function ProblemDetailPage() {
                     )}
                   </div>
                 )}
-                {!isCompetitionMode ? (
+                {!isCompetitionMode && showTestTray ? (
                 <div className="custom-test-panel">
-                  <h4 className="custom-test-title">Custom Test Runner</h4>
-                  <p className="custom-test-subtitle">
-                    Validate your code on your own input/output before submitting official test cases.
-                  </p>
+                  <div className="custom-test-header">
+                    <div>
+                      <h4 className="custom-test-title">Custom Test Runner</h4>
+                      <p className="custom-test-subtitle">
+                        Keep JSON tucked away until you need a specific input/output check.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="custom-json-toggle"
+                      onClick={() => {
+                        setShowTestTray((prev) => !prev)
+                      }}
+                    >
+                      {showTestTray ? 'Hide Tray' : 'Open Tests'}
+                    </button>
+                  </div>
                   <div className="custom-test-grid">
                     <div className="custom-test-col">
                       <label className="custom-test-label">Input (JSON)</label>
@@ -1182,7 +2531,9 @@ export default function ProblemDetailPage() {
                         {customRunResult.passed ? 'Custom test passed' : 'Custom test failed'}
                       </div>
                       {customRunResult.error ? (
-                        <div className="custom-test-result-line">Error: {customRunResult.error}</div>
+                        FATAL_DIAGNOSTIC_PHASES.has(customRunResult.errorDetails?.phase)
+                          ? renderCompilerDiagnostic(customRunResult.errorDetails, true)
+                          : <div className="custom-test-result-line">Error: {customRunResult.error}</div>
                       ) : (
                         <>
                           <div className="custom-test-result-line">Expected: {JSON.stringify(customRunResult.expectedOutput)}</div>
@@ -1194,12 +2545,22 @@ export default function ProblemDetailPage() {
                 </div>
                 ) : null}
                 <Editor
-                  height="500px"
+                  height="100%"
                   language={language}
                   value={code}
                   onChange={handleCodeChange}
                   onMount={(editor, monaco) => {
                     setEditorInstance(editor)
+                    editor.onDidChangeCursorPosition((event: any) => {
+                      const line = event.position?.lineNumber || null
+                      setActiveLine(line)
+                      const matchingEntry = Object.entries(syncMapRef.current).find(([, range]) => (
+                        line !== null &&
+                        line >= range.implementationStartLine &&
+                        line <= range.implementationEndLine + 3
+                      ))
+                      setFocusedNodeId(matchingEntry ? Number(matchingEntry[0]) : null)
+                    })
                     
                     // Only configure JavaScript/TypeScript diagnostics for JavaScript language
                     if (language === 'javascript') {
@@ -1225,9 +2586,10 @@ export default function ProblemDetailPage() {
                       })
                     }
                   }}
-                  theme="vs-dark"
+                  theme={programmingTheme === 'light' ? 'vs' : 'vs-dark'}
                   options={{
                     minimap: { enabled: true },
+                    glyphMargin: true,
                     fontSize: 14,
                     fontFamily: "'Fira Code', 'Cascadia Code', 'Consolas', monospace",
                     fontLigatures: true,
@@ -1271,28 +2633,22 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            <div className={`action-buttons ${isCompetitionMode ? 'competition-code-actions' : ''}`} style={{ marginTop: '2rem' }}>
-              {!isCompetitionMode ? (
-                <button
-                  onClick={() => setShowCodeEditor(!showCodeEditor)}
-                  className="btn btn-secondary"
-                >
-                  {showCodeEditor ? 'Hide' : 'Show'} Code Editor
-                </button>
-              ) : null}
-              {(showCodeEditor || isCompetitionMode) && !isCompetitionMode ? (
-                <button
-                  onClick={handleSubmitCode}
-                  disabled={submitting}
-                  className="btn btn-primary"
-                >
-                  {submitting ? 'Submitting...' : isCompetitionMode ? 'Submit Solution' : 'Submit Code'}
-                </button>
-              ) : null}
-            </div>
-
-            {(codeSubmission || isCompetitionMode) && (
+            {!focusMode && (codeSubmission || isCompetitionMode) && (
               <div className={`submission-results ${isCompetitionMode ? 'competition-results-panel' : ''}`} style={{ marginTop: '2rem' }}>
+                <div className="submission-results-header">
+                  <div>
+                    <span className="submission-results-eyebrow">Execution Result</span>
+                    <h3 className="submission-results-title">Test Cases</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="submission-results-close"
+                    onClick={() => setCodeSubmission(null)}
+                    aria-label="Close test results"
+                  >
+                    ×
+                  </button>
+                </div>
                 {isCompetitionMode ? (
                   <div className="competition-results-header">Test Result</div>
                 ) : null}
@@ -1307,9 +2663,62 @@ export default function ProblemDetailPage() {
                     {codeSubmission.status === 'error' && 'Execution Error'}
                   </span>
                 </div>
+                {submissionDiagnostic && renderCompilerDiagnostic(submissionDiagnostic)}
                 {codeSubmission.score !== undefined && (
                   <div className="submission-score" style={{ marginTop: '1rem', fontSize: '1.1rem', fontWeight: 'bold' }}>
                     Score: {codeSubmission.score}/100
+                  </div>
+                )}
+                {codeSubmission.performance && (
+                  <div className="performance-summary">
+                    <div className="performance-card">
+                      <span className="performance-label">Runtime</span>
+                      <strong>{formatExecutionTime(codeSubmission.performance.current?.executionTime)}</strong>
+                      {codeSubmission.performance.ranking?.eligible && codeSubmission.performance.ranking?.beatsPercent !== null ? (
+                        <small>Beats {codeSubmission.performance.ranking.beatsPercent}% accepted</small>
+                      ) : (
+                        <small>{codeSubmission.performance.ranking?.message || 'Run accepted code to rank'}</small>
+                      )}
+                    </div>
+                    <div className="performance-card">
+                      <span className="performance-label">Time</span>
+                      <strong>{codeSubmission.performance.current?.timeComplexity || 'O(?)'}</strong>
+                      <small>Inferred from submitted code</small>
+                    </div>
+                    <div className="performance-card">
+                      <span className="performance-label">Space</span>
+                      <strong>{codeSubmission.performance.current?.spaceComplexity || 'O(?)'}</strong>
+                      <small>{codeSubmission.performance.current?.note || 'Static analysis estimate'}</small>
+                    </div>
+                    <div className="performance-card performance-rank-card">
+                      <span className="performance-label">Rank</span>
+                      {codeSubmission.performance.ranking?.eligible ? (
+                        <>
+                          <strong>
+                            #{codeSubmission.performance.ranking.rank || '--'} / {codeSubmission.performance.ranking.totalAccepted || '--'}
+                          </strong>
+                          <small>
+                            {codeSubmission.performance.ranking.betterSubmissions > 0
+                              ? `${codeSubmission.performance.ranking.betterSubmissions} better accepted submission${codeSubmission.performance.ranking.betterSubmissions > 1 ? 's' : ''}`
+                              : 'Current best tier'}
+                          </small>
+                        </>
+                      ) : (
+                        <>
+                          <strong>Not ranked</strong>
+                          <small>Pass all tests first</small>
+                        </>
+                      )}
+                    </div>
+                    {codeSubmission.performance.best && (
+                      <div className="performance-best">
+                        <span>Best accepted</span>
+                        <strong>
+                          {codeSubmission.performance.best.timeComplexity} time · {codeSubmission.performance.best.spaceComplexity} space · {formatExecutionTime(codeSubmission.performance.best.executionTime)}
+                        </strong>
+                        <small>{codeSubmission.performance.best.isYourSubmission ? 'This is your submission.' : 'Someone has a better accepted result.'}</small>
+                      </div>
+                    )}
                   </div>
                 )}
                 {codeSubmission.results && codeSubmission.results.length > 0 && (
@@ -1373,45 +2782,21 @@ export default function ProblemDetailPage() {
                         </div>
                         
                         {result.error && (
-                          <div className="error-details-panel">
-                            <div className="error-details-title">❌ Error Details:</div>
-                            <div className="error-details-content">
-                              <div style={{ marginBottom: '0.5rem' }}>
-                                <strong>Message:</strong> {result.error}
+                          FATAL_DIAGNOSTIC_PHASES.has(result.errorDetails?.phase)
+                            ? renderCompilerDiagnostic(result.errorDetails, true)
+                            : (
+                              <div className="error-details-panel">
+                                <div className="error-details-title">Error Details</div>
+                                <div className="error-details-content">
+                                  <div style={{ marginBottom: '0.5rem' }}>
+                                    <strong>Message:</strong> {result.error}
+                                  </div>
+                                  {result.errorDetails?.message && (
+                                    <div>{result.errorDetails.message}</div>
+                                  )}
+                                </div>
                               </div>
-                              {result.errorDetails && (
-                                <>
-                                  {result.errorDetails.lineNumber && (
-                                    <div style={{ marginBottom: '0.5rem' }}>
-                                      <strong>Line:</strong> {result.errorDetails.lineNumber}
-                                      {result.errorDetails.columnNumber && `, Column: ${result.errorDetails.columnNumber}`}
-                                    </div>
-                                  )}
-                                  {result.errorDetails.errorLine && (
-                                    <div style={{ 
-                                      marginTop: '0.75rem',
-                                      padding: '0.75rem',
-                                      background: 'rgba(0, 0, 0, 0.3)',
-                                      borderRadius: '6px',
-                                      borderLeft: '3px solid #ff7675'
-                                    }}>
-                                      <div style={{ fontSize: '0.8rem', color: '#8892b0', marginBottom: '0.25rem' }}>
-                                        Problematic code:
-                                      </div>
-                                      <code style={{ color: '#ff7675' }}>
-                                        {result.errorDetails.errorLine}
-                                      </code>
-                                    </div>
-                                  )}
-                                  {result.errorDetails.suggestion && (
-                                    <div className="error-suggestion">
-                                      {result.errorDetails.suggestion}
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          </div>
+                            )
                         )}
                       </div>
                     ))}
@@ -1424,141 +2809,7 @@ export default function ProblemDetailPage() {
               </div>
             )}
 
-            {!isCompetitionMode && executionSteps.length > 0 && (
-              <div className="execution-trace-panel">
-                <div className="execution-trace-header">
-                  <div>
-                    <h3 className="problem-section-title">Execution Trace</h3>
-                    <p className="execution-trace-subtitle">
-                      A sample run of your structured logic showing stages, variable state, conditions, and control flow.
-                    </p>
-                  </div>
-                  <div className="execution-trace-badge">
-                    {executionSteps.length} trace steps
-                  </div>
-                </div>
-
-                <div className="execution-trace-table-card">
-                  <div className="execution-trace-card-title">Execution Trace Breakdown</div>
-                  <div className="execution-trace-table-scroll">
-                    <table className="execution-trace-table">
-                      <thead>
-                        <tr>
-                          <th>Stage</th>
-                          <th>What Happens</th>
-                          <th>System Display</th>
-                          <th>Purpose</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {executionOverviewRows.map((row) => (
-                          <tr key={row.stage}>
-                            <td>{row.stage}</td>
-                            <td>{row.whatHappens}</td>
-                            <td>{row.systemDisplay}</td>
-                            <td>{row.purpose}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="execution-trace-table-card">
-                  <div className="execution-trace-card-title">Sample Execution Trace</div>
-                  <div className="execution-trace-table-scroll">
-                    <table className="execution-trace-table">
-                      <thead>
-                        <tr>
-                          <th>Step</th>
-                          <th>Stage</th>
-                          <th>Action</th>
-                          <th>Variable State / Result</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {executionSteps.map((step) => (
-                          <tr
-                            key={`${step.stepNumber}-${step.stage}`}
-                            className={currentExecutionStep?.stepNumber === step.stepNumber ? 'active' : ''}
-                            onClick={() => setCurrentExecutionIndex(Math.max(0, step.stepNumber - 1))}
-                          >
-                            <td>{step.stepNumber}</td>
-                            <td>{step.stage}</td>
-                            <td>{step.stepDescription}</td>
-                            <td>{summarizeTraceState(step)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {currentExecutionStep && (
-                  <div className="execution-trace-navigator">
-                    <div className="execution-trace-nav-controls">
-                      <button
-                        type="button"
-                        className="execution-nav-btn"
-                        onClick={() => setCurrentExecutionIndex((prev) => Math.max(prev - 1, 0))}
-                        disabled={currentExecutionIndex === 0}
-                      >
-                        Previous
-                      </button>
-                      <div className="execution-trace-nav-status">
-                        Viewing step {currentExecutionIndex + 1} of {executionSteps.length}
-                      </div>
-                      <button
-                        type="button"
-                        className="execution-nav-btn"
-                        onClick={() => setCurrentExecutionIndex((prev) => Math.min(prev + 1, executionSteps.length - 1))}
-                        disabled={currentExecutionIndex === executionSteps.length - 1}
-                      >
-                        Next
-                      </button>
-                    </div>
-
-                    <div className="execution-trace-focus-card">
-                      <div className="execution-trace-focus-step">
-                        Step {currentExecutionStep.stepNumber}
-                      </div>
-                      <div className="execution-trace-focus-stage">
-                        {currentExecutionStep.stage}
-                      </div>
-                      <div className="execution-trace-focus-copy">
-                        {currentExecutionStep.stepDescription}
-                      </div>
-                      <div className="execution-trace-focus-grid">
-                        <div className="execution-trace-focus-box">
-                          <span>Variables</span>
-                          <code>{formatTraceValue(
-                            Object.fromEntries(
-                              Object.entries(currentExecutionStep.variablesState || {}).filter(([key]) => (
-                                !['stage', 'flowAction', 'iteration', 'systemOutput', 'purpose', 'sourceStep'].includes(key)
-                              ))
-                            )
-                          )}</code>
-                        </div>
-                        <div className="execution-trace-focus-box">
-                          <span>Condition / Flow</span>
-                          <code>
-                            {currentExecutionStep.conditionResult !== null && currentExecutionStep.conditionResult !== undefined
-                              ? currentExecutionStep.conditionResult ? 'TRUE' : 'FALSE'
-                              : currentExecutionStep.flowAction || '—'}
-                          </code>
-                        </div>
-                        <div className="execution-trace-focus-box">
-                          <span>Output</span>
-                          <code>{formatTraceValue(currentExecutionStep.systemOutput)}</code>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!isCompetitionMode ? (
+            {!isCompetitionMode && !focusMode ? (
             <div className="history-section">
               <h3 className="problem-section-title">Submission History</h3>
               {loadingHistory ? (

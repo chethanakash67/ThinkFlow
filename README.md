@@ -14,7 +14,7 @@ ThinkFlow is a web application that emphasizes logic-first coding. Users express
 - No free-form English logic - structured input only
 
 ### 🤖 AI-Powered Semantic Evaluation ⚡ NEW!
-- **Gemini AI** integration for intelligent logic evaluation
+- **OpenAI GPT** integration for intelligent logic evaluation
 - Understands **meaning**, not just exact text matching
 - Different grammar/wording accepted if logic is correct
 - Instant feedback on logic correctness
@@ -163,9 +163,12 @@ See [SETUP.md](./SETUP.md) for detailed installation and setup instructions.
 
 ### ⚠️ Important: AI Evaluation Setup
 
-**To enable intelligent semantic logic evaluation, you MUST set up Gemini AI:**
+**To enable intelligent semantic logic evaluation, add your OpenAI API key to `server/.env`:**
 
-📖 See [GEMINI_SETUP.md](./GEMINI_SETUP.md) for step-by-step instructions to get your FREE API key.
+```env
+OPENAI_API_KEY=sk-your-openai-api-key
+OPENAI_MODEL=gpt-5.4-mini
+```
 
 Without the API key, the system will use basic fallback evaluation (less accurate).
 
@@ -186,7 +189,7 @@ Without the API key, the system will use basic fallback evaluation (less accurat
 3. **Configure environment variables:**
    - Copy `server/.env.example` to `server/.env` and update values
    - Generate and set `FIELD_ENCRYPTION_KEY` with `openssl rand -base64 32`
-   - **Add your GEMINI_API_KEY** (see GEMINI_SETUP.md)
+   - **Add your `OPENAI_API_KEY`**. `OPENAI_MODEL` is optional.
    - Copy `client/.env.local.example` to `client/.env.local` and update values
 
 4. **Run the application:**
@@ -194,7 +197,10 @@ Without the API key, the system will use basic fallback evaluation (less accurat
 npm run dev
 ```
 
-5. **Use the frontend locally at `http://localhost:3000` or point the frontend to your Render backend with `NEXT_PUBLIC_API_URL`**
+5. **Choose the API target:**
+   - Local development defaults to `http://localhost:3001/api`
+   - Render deployment defaults to `https://thinkflow-6t7n.onrender.com/api`
+   - Override either environment with `NEXT_PUBLIC_API_URL`
 
 ## API Endpoints
 

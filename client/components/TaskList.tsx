@@ -5,8 +5,9 @@ import useSWR from 'swr'
 import axios from 'axios'
 import { FaPlus, FaTrash, FaCheck, FaEdit } from 'react-icons/fa'
 import { format } from 'date-fns'
+import { getApiOrigin } from '@/lib/api-url'
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://thinkflow-6t7n.onrender.com/api').replace(/\/api\/?$/, '')
+const API_URL = getApiOrigin()
 
 interface Task {
   id: number

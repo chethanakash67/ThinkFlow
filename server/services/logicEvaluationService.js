@@ -1,13 +1,10 @@
 /**
- * Logic Evaluation Service with Gemini AI
+ * Logic Evaluation Service with OpenAI
  * Evaluates structured logic inputs semantically using AI
  * Provides intelligent feedback based on meaning, not exact text matching
  */
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY');
+const { generateAIText, hasOpenAIKey } = require('./aiClient');
 
 const evaluateLogic = async (logicSteps, problem) => {
   try {
@@ -24,7 +21,11 @@ const evaluateLogic = async (logicSteps, problem) => {
       };
     }
 
-    // Use Gemini AI to evaluate logic semantically
+    if (!hasOpenAIKey) {
+      return fallbackEvaluation(logicSteps, problem);
+    }
+
+    // Use OpenAI to evaluate logic semantically
     const aiEvaluation = await evaluateLogicWithAI(logicSteps, problem);
     
     return aiEvaluation;
@@ -37,9 +38,7 @@ const evaluateLogic = async (logicSteps, problem) => {
 
 const evaluateLogicWithAI = async (logicSteps, problem) => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-
-    // Prepare the prompt for Gemini
+    // Prepare the prompt for OpenAI
     const prompt = `You are an expert programming instructor evaluating a student's problem-solving logic.
 
 **Problem Title:** ${problem.title}
@@ -68,13 +67,16 @@ ${logicSteps.map((step, idx) => `${idx + 1}. [${step.type || 'process'}] ${step.
   "suggestions": ["specific improvement suggestion 1", "suggestion 2"],
   "isSemanticallySimilar": true | false,
   "missingConcepts": ["concept1", "concept2"]
-}
+	}
 
-Be lenient with different phrasings. If the student describes the same algorithmic approach with different words, mark it as correct.`;
+	Be lenient with different phrasings. If the student describes the same algorithmic approach with different words, mark it as correct.`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = await generateAIText({
+      prompt,
+      instructions: 'You are ThinkFlow\'s semantic logic evaluator. Return one strict JSON object only.',
+      json: true,
+      maxOutputTokens: 1600
+    });
     
     // Parse JSON response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -95,7 +97,7 @@ Be lenient with different phrasings. If the student describes the same algorithm
     
     throw new Error('Invalid AI response format');
   } catch (error) {
-    console.error('Gemini AI evaluation error:', error);
+    console.error('OpenAI logic evaluation error:', error);
     throw error;
   }
 };

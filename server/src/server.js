@@ -8,7 +8,9 @@ const authRoutes = require('./routes/auth.routes'); // ✓ Using OTP-based route
 const problemRoutes = require('../routes/problemRoutes');
 const submissionRoutes = require('../routes/submissionRoutes');
 const competitionRoutes = require('../routes/competitionRoutes');
+const logicRoutes = require('../routes/logicRoutes');
 const { init: initDB, pool, runMigrations } = require('./config/db');
+const { getOpenAIModel, hasOpenAIKey } = require('../services/aiClient');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -45,6 +47,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api', logicRoutes);
 app.use('/api/problems', problemRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/competitions', competitionRoutes);
@@ -70,27 +73,38 @@ async function startServer() {
     assertEncryptionConfigured();
     await initDB();
     await runMigrations(); // Run migrations to add missing columns
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log('━'.repeat(60));
       console.log(`🚀 ThinkFlow Server Running`);
       console.log('━'.repeat(60));
       console.log(`📍 Port: ${PORT}`);
       console.log(`📧 SMTP: ${process.env.SMTP_USER ? '✓ Configured' : '✗ Not configured'}`);
       console.log(`🔐 JWT: ${process.env.JWT_SECRET ? '✓ Configured' : '✗ Not configured'}`);
-      console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here' ? '✓ Configured' : '⚠️  NOT CONFIGURED'}`);
+      console.log(`🤖 OpenAI: ${hasOpenAIKey ? `✓ Configured (${getOpenAIModel()})` : '⚠️  NOT CONFIGURED'}`);
 
-      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+      if (!hasOpenAIKey) {
         console.log('');
-        console.log('⚠️  WARNING: Gemini API Key not configured!');
+        console.log('⚠️  WARNING: OpenAI API key not configured!');
         console.log('   Logic evaluation will use basic fallback (less accurate)');
-        console.log('   📖 See GEMINI_SETUP.md for instructions');
-        console.log('   🔗 Get free API key: https://makersuite.google.com/app/apikey');
+        console.log('   Add OPENAI_API_KEY to server/.env');
+        console.log('   Optional: set OPENAI_MODEL to choose a different GPT model');
       }
 
       console.log(`📊 Node: ${process.version}`);
       console.log('━'.repeat(60));
       console.log(`✅ Ready to accept connections`);
       console.log('━'.repeat(60));
+    });
+
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use.`);
+        console.error(`   Stop the existing process or run the server with a different PORT.`);
+        console.error(`   Example: PORT=3003 npm run dev:server`);
+        process.exit(1);
+      }
+
+      throw error;
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

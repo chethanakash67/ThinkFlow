@@ -34,7 +34,8 @@ test('secureData detects tampering', () => {
   const { encryptText, decryptText } = loadSecureData();
 
   const encrypted = encryptText('tamper-check');
-  const tampered = `${encrypted.slice(0, -1)}A`;
+  const replacement = encrypted.endsWith('A') ? 'B' : 'A';
+  const tampered = `${encrypted.slice(0, -1)}${replacement}`;
 
   assert.throws(() => decryptText(tampered));
 });

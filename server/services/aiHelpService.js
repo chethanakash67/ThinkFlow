@@ -1,13 +1,4 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-const geminiKey = String(process.env.GEMINI_API_KEY || '').trim();
-const hasGeminiKey = Boolean(
-  geminiKey &&
-  geminiKey.toLowerCase() !== 'your_gemini_api_key_here' &&
-  geminiKey !== 'YOUR_GEMINI_API_KEY'
-);
-
-const genAI = hasGeminiKey ? new GoogleGenerativeAI(geminiKey) : null;
+const { generateAIText, hasOpenAIKey } = require('./aiClient');
 
 const normalize = (value) => String(value || '').toLowerCase();
 
@@ -195,12 +186,11 @@ const safeParseHelp = (text) => {
 const generateAIHelp = async ({ problem, question, code, language, logicSteps }) => {
   const staticHelp = buildStaticHelp({ problem, question, code, language, logicSteps });
 
-  if (!genAI) {
+  if (!hasOpenAIKey) {
     return staticHelp;
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const prompt = `You are a senior coding interview coach.
 Return strict JSON only.
 
@@ -230,14 +220,14 @@ Output JSON schema:
   "hints": ["hint1", "hint2", "hint3"],
   "nextSteps": ["step1", "step2"],
   "warnings": ["warning1"]
-}`;
+	}`;
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json' }
+    const text = await generateAIText({
+      prompt,
+      instructions: 'You are ThinkFlow\'s coding coach. Return one strict JSON object only.',
+      json: true,
+      maxOutputTokens: 1600
     });
-    const response = await result.response;
-    const text = response.text();
     const parsed = safeParseHelp(text);
 
     if (!parsed || typeof parsed !== 'object') {
@@ -249,10 +239,10 @@ Output JSON schema:
       hints: Array.isArray(parsed.hints) && parsed.hints.length ? capList(parsed.hints, 5) : staticHelp.hints,
       nextSteps: Array.isArray(parsed.nextSteps) && parsed.nextSteps.length ? capList(parsed.nextSteps, 4) : staticHelp.nextSteps,
       warnings: Array.isArray(parsed.warnings) ? capList(parsed.warnings, 4) : staticHelp.warnings,
-      source: 'gemini'
+      source: 'openai'
     };
   } catch (error) {
-    console.error('AI help generation failed, using static analysis:', error.message);
+    console.error('OpenAI help generation failed, using static analysis:', error.message);
     return staticHelp;
   }
 };

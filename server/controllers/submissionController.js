@@ -3,6 +3,165 @@ const { evaluateLogic, generateExecutionSteps } = require('../services/logicEval
 const { executeCode } = require('../services/codeExecutionService');
 const { awardSolvePoints, getLeaderboard, getUserPointsSummary } = require('../services/gamificationService');
 
+const COMPLEXITY_RANK = {
+  'O(1)': 1,
+  'O(log n)': 2,
+  'O(n)': 3,
+  'O(n log n)': 4,
+  'O(n^2)': 5,
+  'O(n^3)': 6,
+  'O(2^n)': 7,
+  'O(?)': 99,
+};
+
+const normalizeCodeForComplexity = (code) => String(code || '')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/\/\/.*$/gm, ' ')
+  .replace(/#.*$/gm, ' ')
+  .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, ' ')
+  .toLowerCase();
+
+const inferCodeComplexity = (code, language = 'javascript') => {
+  const source = normalizeCodeForComplexity(code);
+  const loopMatches = source.match(/\b(for|while)\b/g) || [];
+  const hasSort = /\b(sort|sorted|priority_queue|heapq|collections\.counter|treeset|treemap)\b/.test(source);
+  const hasHashStructure = /\b(unordered_map|unordered_set|hashmap|hashset|map<|set<|new map|new set|dictionary|dict\(|counter\(|object\.create)\b/.test(source);
+  const hasExtraArray = /\b(vector\s*<[^>]+>\s+\w+\s*(?:=|;)|arraylist\s*<[^>]+>\s+\w+|list\s*<[^>]+>\s+\w+|new\s+array|new\s+int\s*\[|push_back\s*\(|append\s*\(|\.push\s*\()\b/.test(source);
+  const hasRecursion = (() => {
+    const names = [...source.matchAll(/\b(?:function|def|int|long|double|bool|void|vector<[^>]+>|public\s+static\s+[\w<>\[\]]+)\s+([a-z_]\w*)\s*\(/g)]
+      .map((match) => match[1])
+      .filter((name) => name && !['if', 'for', 'while', 'switch'].includes(name));
+    return names.some((name) => new RegExp(`\\b${name}\\s*\\(`, 'g').test(source.replace(new RegExp(`\\b${name}\\s*\\([^)]*\\)\\s*\\{?`), '')));
+  })();
+  const hasNestedLoopText = /\b(for|while)\b[\s\S]{0,260}\b(for|while)\b/.test(source);
+  const sortInsideLoop = /\b(for|while)\b[\s\S]{0,260}\bsort\s*\(/.test(source);
+
+  let time = 'O(n)';
+  let note = 'Inferred from loops, sorting calls, recursion, and common data structures.';
+
+  if (hasRecursion && /fib|subset|permutation|backtrack|dfs/.test(source)) {
+    time = 'O(2^n)';
+  } else if (sortInsideLoop) {
+    time = 'O(n^2 log n)';
+  } else if (hasNestedLoopText && loopMatches.length >= 2 && !hasSort) {
+    time = 'O(n^2)';
+  } else if (hasSort) {
+    time = 'O(n log n)';
+  } else if (loopMatches.length === 0) {
+    time = 'O(1)';
+  }
+
+  let space = 'O(1)';
+  if (hasHashStructure || hasExtraArray) {
+    space = 'O(n)';
+  } else if (hasSort || hasRecursion) {
+    space = 'O(log n)';
+  }
+
+  if (language === 'cpp' && /\bsort\s*\(/.test(source) && /\bproduct\b|\bdigit\b/.test(source)) {
+    note = 'Digit processing is treated as constant per number for nums[i] up to 10^6.';
+  }
+
+  return { time, space, note };
+};
+
+const getComplexityRank = (complexity) => {
+  if (COMPLEXITY_RANK[complexity]) return COMPLEXITY_RANK[complexity];
+  if (/n\^2/.test(complexity)) return 5;
+  if (/n\s*log\s*n/.test(complexity)) return 4;
+  if (/\bo\(n\)/i.test(complexity)) return 3;
+  return 99;
+};
+
+const getTotalExecutionTime = (results = []) => results.reduce((sum, result) => (
+  sum + (Number.isFinite(Number(result.executionTime)) ? Number(result.executionTime) : 0)
+), 0);
+
+const buildPerformanceSummary = async ({ submissionId, userId, problemId, code, language, executionResult }) => {
+  const currentComplexity = inferCodeComplexity(code, language);
+  const currentExecutionTime = getTotalExecutionTime(executionResult.results);
+
+  const base = {
+    current: {
+      executionTime: currentExecutionTime,
+      timeComplexity: currentComplexity.time,
+      spaceComplexity: currentComplexity.space,
+      note: currentComplexity.note,
+    },
+    ranking: null,
+    best: null,
+  };
+
+  if (executionResult.status !== 'correct') {
+    return {
+      ...base,
+      ranking: {
+        eligible: false,
+        message: 'Pass all test cases to enter the accepted-submission ranking.',
+      },
+    };
+  }
+
+  const acceptedResult = await query(
+    `SELECT id, user_id, code, language, execution_time, created_at
+     FROM code_submissions
+     WHERE problem_id = $1 AND status = 'correct'
+     ORDER BY created_at ASC`,
+    [problemId]
+  );
+
+  const ranked = acceptedResult.rows
+    .map((submission) => {
+      const complexity = Number(submission.id) === Number(submissionId)
+        ? currentComplexity
+        : inferCodeComplexity(submission.code, submission.language);
+      const executionTime = Number(submission.id) === Number(submissionId)
+        ? currentExecutionTime
+        : Number(submission.execution_time || 0);
+
+      return {
+        id: submission.id,
+        userId: submission.user_id,
+        executionTime,
+        timeComplexity: complexity.time,
+        spaceComplexity: complexity.space,
+        createdAt: submission.created_at,
+        timeRank: getComplexityRank(complexity.time),
+        spaceRank: getComplexityRank(complexity.space),
+      };
+    })
+    .sort((a, b) => (
+      a.timeRank - b.timeRank ||
+      a.spaceRank - b.spaceRank ||
+      a.executionTime - b.executionTime ||
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    ));
+
+  const currentIndex = ranked.findIndex((submission) => Number(submission.id) === Number(submissionId));
+  const rank = currentIndex >= 0 ? currentIndex + 1 : null;
+  const totalAccepted = ranked.length;
+  const best = ranked[0] || null;
+
+  return {
+    ...base,
+    ranking: {
+      eligible: true,
+      rank,
+      totalAccepted,
+      beatsPercent: rank && totalAccepted
+        ? Math.round(((totalAccepted - rank + 1) / totalAccepted) * 100)
+        : null,
+      betterSubmissions: rank ? Math.max(rank - 1, 0) : null,
+    },
+    best: best ? {
+      executionTime: best.executionTime,
+      timeComplexity: best.timeComplexity,
+      spaceComplexity: best.spaceComplexity,
+      isYourSubmission: Number(best.userId) === Number(userId),
+    } : null,
+  };
+};
+
 // Submit logic for evaluation
 const submitLogic = async (req, res) => {
   try {
@@ -218,21 +377,7 @@ const submitCode = async (req, res) => {
       error: executionResult.error
     });
 
-    // If execution resulted in error, return it
-    if (executionResult.status === 'error' && executionResult.error) {
-      return res.status(400).json({ 
-        error: executionResult.error,
-        details: executionResult.errorDetails,
-        submission: {
-          status: 'error',
-          results: executionResult.results,
-          passedCount: 0,
-          totalCount: testCases.length,
-          score: 0,
-          message: executionResult.error
-        }
-      });
-    }
+    const totalExecutionTime = getTotalExecutionTime(executionResult.results);
 
     // Save code submission with results
     const result = await query(
@@ -247,7 +392,7 @@ const submitCode = async (req, res) => {
         selectedLanguage, 
         executionResult.status,
         JSON.stringify(executionResult.results),
-        executionResult.results[0]?.executionTime || 0
+        totalExecutionTime
       ]
     );
 
@@ -261,6 +406,15 @@ const submitCode = async (req, res) => {
       pointsAwarded = awardResult.points;
     }
 
+    const performance = await buildPerformanceSummary({
+      submissionId: result.rows[0].id,
+      userId,
+      problemId,
+      code,
+      language: selectedLanguage,
+      executionResult,
+    });
+
     res.status(201).json({
       submission: {
         id: result.rows[0].id,
@@ -270,10 +424,15 @@ const submitCode = async (req, res) => {
         score: executionResult.score,
         pointsAwarded,
         results: executionResult.results,
+        error: executionResult.error,
+        errorDetails: executionResult.errorDetails,
+        performance,
         message: executionResult.status === 'correct' 
           ? 'All test cases passed!' 
           : executionResult.status === 'partially_correct'
           ? `${executionResult.passedCount}/${executionResult.totalCount} test cases passed`
+          : executionResult.status === 'error'
+          ? executionResult.errorDetails?.title || executionResult.error || 'Execution error'
           : 'No test cases passed',
       },
     });
@@ -313,17 +472,20 @@ const runCustomCodeTest = async (req, res) => {
     const customTestCase = [{ input: customInput, output: expectedOutput }];
     const executionResult = await executeCode(code, customTestCase, selectedLanguage);
 
-    if (executionResult.status === 'error') {
-      return res.status(400).json({
-        error: executionResult.error || 'Execution error',
-        details: executionResult.errorDetails,
-        result: executionResult.results?.[0] || null
-      });
-    }
-
     return res.json({
-      result: executionResult.results[0],
-      status: executionResult.results[0]?.passed ? 'passed' : 'failed'
+      result: executionResult.results[0] || {
+        input: customInput,
+        expectedOutput,
+        actualOutput: null,
+        passed: false,
+        error: executionResult.error || 'Execution error',
+        errorDetails: executionResult.errorDetails || null,
+      },
+      error: executionResult.error,
+      errorDetails: executionResult.errorDetails,
+      status: executionResult.status === 'error'
+        ? 'error'
+        : executionResult.results[0]?.passed ? 'passed' : 'failed'
     });
   } catch (error) {
     console.error('Run custom code test error:', error);

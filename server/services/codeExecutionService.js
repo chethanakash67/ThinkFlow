@@ -46,6 +46,147 @@ const DOCKER_LIMITS = [
   '--rm',                  // Auto-remove container
 ];
 
+// ─── Compiler Diagnostic Helpers ──────────────────────────────────────────────
+
+const stripAnsi = (value = '') => String(value).replace(/\x1b\[[0-9;]*m/g, '');
+
+const firstMeaningfulLine = (value = '') => (
+  stripAnsi(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean) || ''
+);
+
+const extractErrorMessage = (raw = '', fallback = 'Execution failed') => {
+  const clean = stripAnsi(raw);
+  const severityMatch = clean.match(/\b(?:fatal\s+)?(?:error|warning):\s*([^\n]+)/i);
+  if (severityMatch) return severityMatch[1].trim();
+
+  const exceptionMatch = clean.match(/\b([A-Za-z_][\w.]*?(?:Error|Exception)):\s*([^\n]+)/);
+  if (exceptionMatch) return `${exceptionMatch[1]}: ${exceptionMatch[2].trim()}`;
+
+  return firstMeaningfulLine(clean) || fallback;
+};
+
+const parseDiagnosticLocation = (raw = '', lineOffset = 0) => {
+  const clean = stripAnsi(raw);
+  const patterns = [
+    /(?:^|\n)(?:[^:\n]*[/\\])?[^:\n]*\.(?:cpp|cc|cxx|c|java|js|py):(\d+):(\d+):/i,
+    /(?:^|\n)(?:[^:\n]*[/\\])?[^:\n]*\.(?:java|py):(\d+):/i,
+    /File\s+"[^"]+",\s+line\s+(\d+)/i,
+    /(?:^|\n)\s*at\s+.*?\((?:[^:\n]*[/\\])?[^:\n]+:(\d+):(\d+)\)/i,
+    /(?:^|\n)\s*at\s+(?:[^:\n]*[/\\])?[^:\n]+:(\d+):(\d+)/i,
+    /\bline\s+(\d+)(?:,\s*column\s+(\d+))?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = clean.match(pattern);
+    if (match) {
+      const reportedLine = Number(match[1]);
+      const reportedColumn = match[2] ? Number(match[2]) : null;
+      const lineNumber = Number.isFinite(reportedLine)
+        ? Math.max(1, reportedLine - lineOffset)
+        : null;
+
+      return {
+        lineNumber,
+        columnNumber: Number.isFinite(reportedColumn) ? reportedColumn : null,
+      };
+    }
+  }
+
+  return { lineNumber: null, columnNumber: null };
+};
+
+const getCodeFrame = (code = '', lineNumber = null, radius = 2) => {
+  if (!lineNumber) return null;
+
+  const lines = String(code || '').split('\n');
+  if (lineNumber < 1 || lineNumber > lines.length) return null;
+
+  const start = Math.max(1, lineNumber - radius);
+  const end = Math.min(lines.length, lineNumber + radius);
+
+  return Array.from({ length: end - start + 1 }, (_, index) => {
+    const currentLine = start + index;
+    return {
+      lineNumber: currentLine,
+      content: lines[currentLine - 1],
+      highlight: currentLine === lineNumber,
+    };
+  });
+};
+
+const getDiagnosticSuggestion = ({ phase, language, message }) => {
+  const text = String(message || '').toLowerCase();
+
+  if (phase === 'compile') {
+    if (/expected|before|after|token|';'|semicolon/.test(text)) {
+      return 'Check the highlighted line for a missing semicolon, bracket, parenthesis, or comma.';
+    }
+    if (/not declared|cannot find symbol|undefined|not defined|was not declared/.test(text)) {
+      return 'A name used here is not visible. Check spelling, scope, and whether the variable/function is declared before use.';
+    }
+    if (/no matching function|cannot convert|incompatible|argument/.test(text)) {
+      return 'The function call or return type does not match the expected signature for this problem.';
+    }
+    return `Fix the ${language || 'source'} compile error, then run again.`;
+  }
+
+  if (/time limit|timed out|infinite/.test(text)) {
+    return 'This usually means an infinite loop or an algorithm that is too slow for the constraints.';
+  }
+  if (/memory|bad_alloc|outofmemory|heap/.test(text)) {
+    return 'Reduce large allocations or repeated copies. Reuse data structures where possible.';
+  }
+  if (/index|out of range|bounds|segmentation|segfault|null|undefined|none/.test(text)) {
+    return 'Check boundary conditions, empty inputs, and whether a value exists before accessing it.';
+  }
+
+  return 'Use the failing input below to reproduce the issue and inspect the highlighted line first.';
+};
+
+const buildDiagnostic = ({
+  phase,
+  language,
+  raw,
+  code,
+  lineOffset = 0,
+  fallbackMessage,
+}) => {
+  const cleanRaw = stripAnsi(raw || fallbackMessage || '');
+  const message = extractErrorMessage(cleanRaw, fallbackMessage);
+  const location = parseDiagnosticLocation(cleanRaw, lineOffset);
+
+  return {
+    phase,
+    title: phase === 'compile'
+      ? 'Compilation Error'
+      : phase === 'time_limit'
+        ? 'Time Limit Exceeded'
+        : phase === 'memory_limit'
+          ? 'Memory Limit Exceeded'
+          : phase === 'output_limit'
+            ? 'Output Limit Exceeded'
+            : 'Runtime Error',
+    severity: 'error',
+    language,
+    message,
+    raw: cleanRaw,
+    stderr: cleanRaw,
+    lineNumber: location.lineNumber,
+    columnNumber: location.columnNumber,
+    errorLine: location.lineNumber ? String(code || '').split('\n')[location.lineNumber - 1] : null,
+    codeFrame: getCodeFrame(code, location.lineNumber),
+    suggestion: getDiagnosticSuggestion({ phase, language, message }),
+  };
+};
+
+const isFatalExecutionError = (result) => {
+  const phase = result?.errorDetails?.phase;
+  return ['compile', 'runtime', 'time_limit', 'memory_limit', 'output_limit'].includes(phase);
+};
+
 // ─── Concurrency Limiter ──────────────────────────────────────────────────────
 
 let activeSubmissions = 0;
@@ -125,13 +266,20 @@ const executeCode = async (code, testCases, language = 'javascript', timeoutMs =
       const testCase = testCases[i];
       const result = await config.executor(code, testCase, timeoutMs || config.timeout);
       results.push(result);
+
+      if (isFatalExecutionError(result)) {
+        break;
+      }
     }
 
     const passedCount = results.filter((r) => r.passed).length;
-    const totalCount = results.length;
+    const totalCount = testCases.length;
+    const fatalResult = results.find(isFatalExecutionError);
 
     let status;
-    if (passedCount === totalCount) {
+    if (fatalResult) {
+      status = 'error';
+    } else if (passedCount === totalCount) {
       status = 'correct';
     } else if (passedCount > 0) {
       status = 'partially_correct';
@@ -139,13 +287,29 @@ const executeCode = async (code, testCases, language = 'javascript', timeoutMs =
       status = 'incorrect';
     }
 
-    return { status, results, passedCount, totalCount, score: Math.round((passedCount / totalCount) * 100) };
+    return {
+      status,
+      results,
+      passedCount,
+      totalCount,
+      score: Math.round((passedCount / totalCount) * 100),
+      error: fatalResult?.error || null,
+      errorDetails: fatalResult?.errorDetails || null,
+    };
   } catch (error) {
     console.error('[Judge] Execution error:', error.message);
+    const diagnostic = buildDiagnostic({
+      phase: 'runtime',
+      language: lang,
+      raw: error.message || error.stack,
+      code,
+      fallbackMessage: error.message || 'Unknown execution error',
+    });
+
     return {
       status: 'error',
       error: error.message || 'Unknown execution error',
-      errorDetails: error.stack,
+      errorDetails: diagnostic,
       results: [],
       passedCount: 0,
       totalCount: testCases.length,
@@ -326,8 +490,7 @@ const executeJavaScript = async (code, testCase, timeoutMs) => {
 
   try {
     const functionNames = extractFunctionNames(code, 'javascript');
-    const wrappedCode = `
-${code}
+    const wrappedCode = `${code}
 
 const __testInput = ${JSON.stringify(testCase.input)};
 const __argValues = ${JSON.stringify(getInvocationArgs(testCase.input))};
@@ -363,7 +526,7 @@ console.log(JSON.stringify(__result));
       ? await runCommand(tempDir, 'node', ['--max-old-space-size=256', 'solution.js'], execTimeout)
       : await subprocessExec('node', ['--max-old-space-size=256', sourceFile], execTimeout);
 
-    return buildTestResult(result, testCase);
+    return buildTestResult(result, testCase, { language: 'javascript', code });
   } finally {
     await cleanup(tempDir);
   }
@@ -375,11 +538,8 @@ const executePython = async (code, testCase, timeoutMs) => {
 
   try {
     const functionNames = extractFunctionNames(code, 'python');
-    const wrappedCode = `
-import json
-import sys
-
-${code}
+    const prefix = `import json\nimport sys\n\n`;
+    const wrappedCode = `${prefix}${code}
 
 def __invoke(fn, test_input, arg_values):
     if len(arg_values) > 1:
@@ -417,7 +577,11 @@ if __name__ == "__main__":
       ? await runCommand(tempDir, 'python3', ['-u', 'solution.py'], execTimeout)
       : await subprocessExec('python3', ['-u', sourceFile], execTimeout);
 
-    return buildTestResult(result, testCase);
+    return buildTestResult(result, testCase, {
+      language: 'python',
+      code,
+      lineOffset: prefix.split('\n').length - 1,
+    });
   } finally {
     await cleanup(tempDir);
   }
@@ -448,6 +612,10 @@ const executeCpp = async (code, testCase, timeoutMs) => {
         ? ''
         : inputEntries.map(({ name }) => sanitizeIdentifier(name)).join(', ');
 
+      const invocation = signature?.isClassMethod
+        ? `Solution __solution;\n    auto __result = __solution.${functionName}(${invocationArgs});`
+        : `auto __result = ${functionName}(${invocationArgs});`;
+
       finalCode = `
 #include <algorithm>
 #include <climits>
@@ -469,7 +637,9 @@ const executeCpp = async (code, testCase, timeoutMs) => {
 #include <vector>
 using namespace std;
 
+#line 1 "solution.cpp"
 ${stripFunctionByName(normalizedCode, 'main')}
+#line 2000 "thinkflow_runner.cpp"
 
 string __escapeString(const string& value) {
     string out = "\\"";
@@ -508,7 +678,7 @@ string __toJson(const pair<A, B>& value) {
 
 int main() {
 ${declarations}
-    auto __result = ${functionName}(${invocationArgs});
+    ${invocation}
     cout << __toJson(__result);
     return 0;
 }
@@ -524,7 +694,7 @@ ${declarations}
       : await subprocessExec('g++', ['-std=c++17', '-O2', '-DONLINE_JUDGE', '-o', path.join(tempDir, 'solution'), sourceFile], TIMEOUTS.cpp.compile);
 
     if (compileResult.exitCode !== 0) {
-      return buildCompileError(compileResult, testCase);
+      return buildCompileError(compileResult, testCase, { language: 'cpp', code });
     }
 
     // Execute
@@ -536,7 +706,7 @@ ${declarations}
       ? await runCommand(tempDir, './solution', [], execTimeout, stdinPayload)
       : await subprocessExec(path.join(tempDir, 'solution'), [], execTimeout, stdinPayload);
 
-    return buildTestResult(execResult, testCase);
+    return buildTestResult(execResult, testCase, { language: 'cpp', code });
   } finally {
     await cleanup(tempDir);
   }
@@ -555,6 +725,7 @@ const executeJava = async (code, testCase, timeoutMs) => {
     const shouldWrapFunction = Boolean(functionName);
     const mainClassName = hasMain ? userClassName : 'Solution';
     const sourceFile = path.join(tempDir, `${mainClassName}.java`);
+    let userLineOffset = 0;
 
     let finalCode = code;
     if (!hasMain || shouldWrapFunction) {
@@ -566,9 +737,9 @@ const executeJava = async (code, testCase, timeoutMs) => {
       const classBody = declaredClassName
         ? code
         : `public class Solution {\n${code}\n}\n`;
+      userLineOffset = declaredClassName ? 2 : 3;
 
-      finalCode = `
-import java.util.*;
+      finalCode = `import java.util.*;
 
 ${classBody}
 
@@ -631,7 +802,7 @@ ${declarations}
       : await subprocessExec('javac', [sourceFile], TIMEOUTS.java.compile);
 
     if (compileResult.exitCode !== 0) {
-      return buildCompileError(compileResult, testCase);
+      return buildCompileError(compileResult, testCase, { language: 'java', code, lineOffset: userLineOffset });
     }
 
     // Execute
@@ -642,7 +813,7 @@ ${declarations}
       ? await runCommand(tempDir, 'java', ['-Xmx256m', '-cp', '/sandbox', runClass], execTimeout, stdinPayload)
       : await subprocessExec('java', ['-Xmx256m', '-cp', tempDir, runClass], execTimeout, stdinPayload);
 
-    return buildTestResult(execResult, testCase);
+    return buildTestResult(execResult, testCase, { language: 'java', code, lineOffset: userLineOffset });
   } finally {
     await cleanup(tempDir);
   }
@@ -676,7 +847,9 @@ const executeC = async (code, testCase, timeoutMs) => {
 #include <string.h>
 #include <math.h>
 
+#line 1 "solution.c"
 ${stripFunctionByName(code, 'main')}
+#line 2000 "thinkflow_runner.c"
 
 void __print_int_array(const int* arr, int len) {
     printf("[");
@@ -708,7 +881,7 @@ ${buildCInvocationCode(functionName, inputEntries, signature?.returnType || '', 
       : await subprocessExec('gcc', ['-std=c11', '-O2', '-DONLINE_JUDGE', '-lm', '-o', path.join(tempDir, 'solution'), sourceFile], TIMEOUTS.c.compile);
 
     if (compileResult.exitCode !== 0) {
-      return buildCompileError(compileResult, testCase);
+      return buildCompileError(compileResult, testCase, { language: 'c', code });
     }
 
     // Execute
@@ -718,7 +891,7 @@ ${buildCInvocationCode(functionName, inputEntries, signature?.returnType || '', 
       ? await runCommand(tempDir, './solution', [], execTimeout, stdinPayload)
       : await subprocessExec(path.join(tempDir, 'solution'), [], execTimeout, stdinPayload);
 
-    return buildTestResult(execResult, testCase);
+    return buildTestResult(execResult, testCase, { language: 'c', code });
   } finally {
     await cleanup(tempDir);
   }
@@ -726,10 +899,19 @@ ${buildCInvocationCode(functionName, inputEntries, signature?.returnType || '', 
 
 // ─── Result Builders ──────────────────────────────────────────────────────────
 
-const buildTestResult = (execResult, testCase) => {
+const buildTestResult = (execResult, testCase, context = {}) => {
   const { exitCode, stdout, stderr, executionTime, timedOut, ole } = execResult;
+  const { language, code, lineOffset = 0 } = context;
 
   if (timedOut) {
+    const diagnostic = buildDiagnostic({
+      phase: 'time_limit',
+      language,
+      raw: 'Code execution exceeded the time limit.',
+      code,
+      fallbackMessage: 'Code execution exceeded the time limit.',
+    });
+
     return {
       input: testCase.input,
       expectedOutput: testCase.output,
@@ -737,11 +919,19 @@ const buildTestResult = (execResult, testCase) => {
       passed: false,
       executionTime,
       error: 'Time Limit Exceeded',
-      errorDetails: { message: 'Code execution exceeded time limit. Check for infinite loops or optimize your algorithm.' },
+      errorDetails: diagnostic,
     };
   }
 
   if (ole) {
+    const diagnostic = buildDiagnostic({
+      phase: 'output_limit',
+      language,
+      raw: 'Your program produced too much output. Limit: 64KB.',
+      code,
+      fallbackMessage: 'Your program produced too much output.',
+    });
+
     return {
       input: testCase.input,
       expectedOutput: testCase.output,
@@ -749,7 +939,7 @@ const buildTestResult = (execResult, testCase) => {
       passed: false,
       executionTime,
       error: 'Output Limit Exceeded',
-      errorDetails: { message: 'Your program produced too much output. Limit: 64KB.' },
+      errorDetails: diagnostic,
     };
   }
 
@@ -762,6 +952,15 @@ const buildTestResult = (execResult, testCase) => {
       exitCode === 137; // OOM killed
 
     if (isMemoryError) {
+      const diagnostic = buildDiagnostic({
+        phase: 'memory_limit',
+        language,
+        raw: stderr || 'Your program exceeded the memory limit.',
+        code,
+        lineOffset,
+        fallbackMessage: 'Your program exceeded the 256MB memory limit.',
+      });
+
       return {
         input: testCase.input,
         expectedOutput: testCase.output,
@@ -769,9 +968,18 @@ const buildTestResult = (execResult, testCase) => {
         passed: false,
         executionTime,
         error: 'Memory Limit Exceeded',
-        errorDetails: { message: 'Your program exceeded the 256MB memory limit.' },
+        errorDetails: diagnostic,
       };
     }
+
+    const diagnostic = buildDiagnostic({
+      phase: 'runtime',
+      language,
+      raw: stderr || `Process exited with code ${exitCode}`,
+      code,
+      lineOffset,
+      fallbackMessage: `Process exited with code ${exitCode}`,
+    });
 
     return {
       input: testCase.input,
@@ -779,8 +987,8 @@ const buildTestResult = (execResult, testCase) => {
       actualOutput: null,
       passed: false,
       executionTime,
-      error: `Runtime Error:\n${stderr || 'Process exited with code ' + exitCode}`,
-      errorDetails: { message: stderr },
+      error: `${diagnostic.title}:\n${diagnostic.raw || diagnostic.message}`,
+      errorDetails: diagnostic,
     };
   }
 
@@ -809,20 +1017,36 @@ const buildTestResult = (execResult, testCase) => {
       passed,
       executionTime,
       error: passed ? null : 'Output format mismatch',
-      errorDetails: passed ? null : { message: `Expected: ${testCase.output}, Got: ${comparableStdout}` },
+      errorDetails: passed ? null : {
+        phase: 'wrong_answer',
+        title: 'Wrong Answer',
+        severity: 'error',
+        message: `Expected: ${testCase.output}, Got: ${comparableStdout}`,
+      },
     };
   }
 };
 
-const buildCompileError = (compileResult, testCase) => ({
-  input: testCase.input,
-  expectedOutput: testCase.output,
-  actualOutput: null,
-  passed: false,
-  executionTime: compileResult.executionTime,
-  error: `Compilation Error:\n${compileResult.stderr}`,
-  errorDetails: { message: compileResult.stderr },
-});
+const buildCompileError = (compileResult, testCase, context = {}) => {
+  const diagnostic = buildDiagnostic({
+    phase: 'compile',
+    language: context.language,
+    raw: compileResult.stderr || compileResult.stdout || 'Compilation failed.',
+    code: context.code,
+    lineOffset: context.lineOffset || 0,
+    fallbackMessage: 'Compilation failed.',
+  });
+
+  return {
+    input: testCase.input,
+    expectedOutput: testCase.output,
+    actualOutput: null,
+    passed: false,
+    executionTime: compileResult.executionTime,
+    error: `Compilation Error:\n${diagnostic.raw || diagnostic.message}`,
+    errorDetails: diagnostic,
+  };
+};
 
 // ─── Helper Utilities ─────────────────────────────────────────────────────────
 
@@ -974,9 +1198,36 @@ const stripFunctionByName = (code, functionName) => {
   return `${code.slice(0, startIndex)}\n${code.slice(endIndex)}`.trim();
 };
 
-const extractCppFunctionSignature = (code, functionName) => {
+const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const extractCppClassBody = (code, className) => {
+  const match = new RegExp(`\\bclass\\s+${escapeRegExp(className)}\\b[^\\{]*\\{`).exec(code);
+  if (!match) return null;
+
+  const openBraceIndex = code.indexOf('{', match.index);
+  if (openBraceIndex === -1) return null;
+
+  let depth = 0;
+  for (let index = openBraceIndex; index < code.length; index += 1) {
+    const char = code[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return code.slice(openBraceIndex + 1, index);
+      }
+    }
+  }
+
+  return null;
+};
+
+const matchCppFunctionSignature = (code, functionName) => {
   if (!functionName) return null;
-  const pattern = new RegExp(`([\\w:<>,~*&\\s]+?)\\s+${functionName}\\s*\\(([^)]*)\\)\\s*\\{`);
+  const pattern = new RegExp(
+    `(?:^|\\n)\\s*(?:public:|private:|protected:)?\\s*(?:static\\s+)?([\\w:<>,~*&\\s]+?)\\s+${escapeRegExp(functionName)}\\s*\\(([^)]*)\\)\\s*(?:const\\s*)?\\{`,
+    'm'
+  );
   const match = code.match(pattern);
   if (!match) return null;
 
@@ -984,6 +1235,19 @@ const extractCppFunctionSignature = (code, functionName) => {
   const parameterCount = !params || params === 'void' ? 0 : params.split(',').length;
 
   return { returnType: match[1].trim(), parameterCount };
+};
+
+const extractCppFunctionSignature = (code, functionName) => {
+  if (!functionName) return null;
+  const solutionBody = extractCppClassBody(code, 'Solution');
+  const classSignature = solutionBody ? matchCppFunctionSignature(solutionBody, functionName) : null;
+
+  if (classSignature) {
+    return { ...classSignature, isClassMethod: true, className: 'Solution' };
+  }
+
+  const freeSignature = matchCppFunctionSignature(code, functionName);
+  return freeSignature ? { ...freeSignature, isClassMethod: false } : null;
 };
 
 // ─── Java Helpers ─────────────────────────────────────────────────────────────

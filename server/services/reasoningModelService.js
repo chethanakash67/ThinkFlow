@@ -1,13 +1,4 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-const geminiKey = String(process.env.GEMINI_API_KEY || '').trim();
-const hasGeminiKey = Boolean(
-  geminiKey &&
-  geminiKey.toLowerCase() !== 'your_gemini_api_key_here' &&
-  geminiKey !== 'YOUR_GEMINI_API_KEY'
-);
-
-const genAI = hasGeminiKey ? new GoogleGenerativeAI(geminiKey) : null;
+const { generateAIText, hasOpenAIKey } = require('./aiClient');
 
 const normalize = (value) => String(value || '').toLowerCase();
 
@@ -65,12 +56,11 @@ const fallbackReasoningEvaluation = ({ intendedLogic, structuredCodeFlow }) => {
 const generateReasoningEvaluation = async ({ intendedLogic, structuredCodeFlow }) => {
   const fallback = fallbackReasoningEvaluation({ intendedLogic, structuredCodeFlow });
 
-  if (!genAI) {
+  if (!hasOpenAIKey) {
     return fallback;
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const prompt = `You are Think Flow's reasoning evaluator.
 You must analyze logic/workflow only.
 Never generate code.
@@ -95,12 +85,15 @@ Output STRICT JSON only:
   "mismatchPoint": "short sentence",
   "whyMismatch": "short explanation",
   "conceptToReview": "single concept",
-  "improvementDirection": "conceptual improvement, no code"
-}`;
+	  "improvementDirection": "conceptual improvement, no code"
+	}`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = await generateAIText({
+      prompt,
+      instructions: 'You are ThinkFlow\'s reasoning evaluator. Return one strict JSON object only.',
+      json: true,
+      maxOutputTokens: 1200
+    });
     const match = text.match(/\{[\s\S]*\}/);
 
     if (!match) {
@@ -114,10 +107,10 @@ Output STRICT JSON only:
       whyMismatch: parsed.whyMismatch || fallback.whyMismatch,
       conceptToReview: parsed.conceptToReview || fallback.conceptToReview,
       improvementDirection: parsed.improvementDirection || fallback.improvementDirection,
-      source: 'gemini'
+      source: 'openai'
     };
   } catch (error) {
-    console.error('Reasoning model failed, using fallback:', error.message);
+    console.error('Reasoning OpenAI model failed, using fallback:', error.message);
     return fallback;
   }
 };

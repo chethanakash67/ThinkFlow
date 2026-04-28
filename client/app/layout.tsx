@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { AuthProvider } from '@/context/auth.context'
 import GlobalNav from '@/components/GlobalNav'
+import '@xyflow/react/dist/style.css'
 import './globals.css'
 
 export const metadata: Metadata = {

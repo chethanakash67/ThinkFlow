@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+process.env.OPENAI_API_KEY = '';
+
 const { generateExecutionSteps, evaluateLogic } = require('../services/logicEvaluationService');
 
 test('generateExecutionSteps builds staged execution trace with conditions and final output', () => {
@@ -32,9 +34,6 @@ test('generateExecutionSteps builds staged execution trace with conditions and f
 });
 
 test('evaluateLogic fallback recognizes frequency-sort strategy for sort by frequency then value', async () => {
-  const originalKey = process.env.GEMINI_API_KEY;
-  process.env.GEMINI_API_KEY = '';
-
   const problem = {
     title: 'Sort by Frequency then Value',
     description: 'Sort an array by increasing frequency, and if two values have the same frequency, sort by value.',
@@ -52,12 +51,6 @@ test('evaluateLogic fallback recognizes frequency-sort strategy for sort by freq
   ];
 
   const result = await evaluateLogic(logicSteps, problem);
-
-  if (originalKey) {
-    process.env.GEMINI_API_KEY = originalKey;
-  } else {
-    delete process.env.GEMINI_API_KEY;
-  }
 
   assert.notEqual(result.status, 'incorrect');
   assert.ok(result.score >= 50);
