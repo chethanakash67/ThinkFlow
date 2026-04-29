@@ -21,6 +21,41 @@ const getReplyTo = () => {
   return { email, name };
 };
 
+const getAddressText = (address) => {
+  if (!address) return '';
+  if (typeof address === 'string') return address;
+  return address.email || '';
+};
+
+const buildSendGridErrorMessage = (err, message) => {
+  const statusCode = err.code || err.response?.statusCode || err.response?.status;
+  const responseBody = err.response?.body;
+  const senderEmail = getAddressText(message?.from) || getSender().email;
+  const sendGridErrors = Array.isArray(responseBody?.errors)
+    ? responseBody.errors.map((error) => error.message).filter(Boolean)
+    : [];
+  const baseMessage = sendGridErrors.length > 0
+    ? sendGridErrors.join('; ')
+    : err.message || 'SendGrid request failed';
+  const hints = [];
+
+  if (statusCode === 403) {
+    hints.push(`Verify that "${senderEmail}" is a verified Sender Identity in SendGrid.`);
+    hints.push('Make sure the API key has Full Access or Mail Send permission.');
+    hints.push('Check whether the SendGrid account is suspended, under review, or out of credits.');
+  }
+
+  if (/maximum credits exceeded/i.test(baseMessage)) {
+    hints.push('SendGrid credits are exhausted. Add credits or use a different active SendGrid account/key.');
+  }
+
+  return [
+    statusCode ? `SendGrid ${statusCode}` : 'SendGrid error',
+    baseMessage,
+    hints.length ? `Fix: ${hints.join(' ')}` : ''
+  ].filter(Boolean).join(' - ');
+};
+
 const getSendGridClient = () => {
   const apiKey = process.env.SENDGRID_API_KEY;
   if (!apiKey) {
@@ -62,9 +97,12 @@ async function sendEmail(message) {
   try {
     return sendViaSendGrid(message);
   } catch (err) {
-    const errBody = err.response?.body || err.message;
-    console.error('❌ SendGrid email error:', errBody);
-    throw new Error(typeof errBody === 'object' ? JSON.stringify(errBody) : errBody);
+    const diagnostic = buildSendGridErrorMessage(err, message);
+    console.error('❌ SendGrid email error:', diagnostic);
+    if (err.response?.body) {
+      console.error('❌ SendGrid response body:', JSON.stringify(err.response.body));
+    }
+    throw new Error(diagnostic);
   }
 }
 
