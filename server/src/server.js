@@ -11,7 +11,6 @@ const competitionRoutes = require('../routes/competitionRoutes');
 const logicRoutes = require('../routes/logicRoutes');
 const { init: initDB, pool, runMigrations } = require('./config/db');
 const { getOpenAIModel, hasOpenAIKey } = require('../services/aiClient');
-const { getEmailProvider, isEmailConfigured } = require('./services/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -79,7 +78,7 @@ async function startServer() {
       console.log(`🚀 ThinkFlow Server Running`);
       console.log('━'.repeat(60));
       console.log(`📍 Port: ${PORT}`);
-      console.log(`📧 Email: ${isEmailConfigured() ? `✓ Configured (${getEmailProvider()})` : '✗ Not configured'}`);
+      console.log(`📧 SMTP: ${process.env.SMTP_USER ? '✓ Configured' : '✗ Not configured'}`);
       console.log(`🔐 JWT: ${process.env.JWT_SECRET ? '✓ Configured' : '✗ Not configured'}`);
       console.log(`🤖 OpenAI: ${hasOpenAIKey ? `✓ Configured (${getOpenAIModel()})` : '⚠️  NOT CONFIGURED'}`);
 
