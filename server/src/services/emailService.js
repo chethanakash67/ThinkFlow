@@ -1,22 +1,37 @@
 /**
- * Email Service — SendGrid HTTP API
- * Uses @sendgrid/mail (HTTPS on port 443 — works on Render)
+ * Email Service
+ * Prefers SMTP when EMAIL_USER/EMAIL_PASSWORD or SMTP_USER/SMTP_PASS are set.
+ * Falls back to SendGrid when SENDGRID_API_KEY is configured.
  */
+const nodemailer = require('nodemailer');
 const sgMail = require('@sendgrid/mail');
 
+const getSmtpUser = () => process.env.SMTP_USER || process.env.EMAIL_USER || '';
+const getSmtpPassword = () => process.env.SMTP_PASS || process.env.EMAIL_PASSWORD || '';
+const normalizeSmtpPassword = (password) => String(password || '').replace(/\s+/g, '');
+
+const isSmtpConfigured = () => Boolean(getSmtpUser() && getSmtpPassword());
+const isSendGridConfigured = () => Boolean(process.env.SENDGRID_API_KEY);
+const isEmailConfigured = () => isSmtpConfigured() || isSendGridConfigured();
+const getEmailProvider = () => {
+  if (isSmtpConfigured()) return 'smtp';
+  if (isSendGridConfigured()) return 'sendgrid';
+  return 'none';
+};
+
 const getSender = () => {
-  const email = process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
+  const email = process.env.EMAIL_FROM_ADDRESS || getSmtpUser() || 'chethanakash67@gmail.com';
   const name = process.env.EMAIL_FROM_NAME || 'ThinkFlow';
   return { email, name };
 };
 
 const getReplyTo = () => {
-  const email = process.env.EMAIL_REPLY_TO || process.env.EMAIL_FROM_ADDRESS || 'chethanakash67@gmail.com';
+  const email = process.env.EMAIL_REPLY_TO || process.env.EMAIL_FROM_ADDRESS || getSmtpUser() || 'chethanakash67@gmail.com';
   const name = process.env.EMAIL_FROM_NAME || 'ThinkFlow Support';
   return { email, name };
 };
 
-const getClient = () => {
+const getSendGridClient = () => {
   const apiKey = process.env.SENDGRID_API_KEY;
   if (!apiKey) {
     throw new Error('SENDGRID_API_KEY environment variable is not set');
@@ -25,9 +40,52 @@ const getClient = () => {
   return sgMail;
 };
 
-async function sendEmail(message) {
-  const client = getClient();
+const getSmtpTransporter = () => {
+  if (!isSmtpConfigured()) {
+    throw new Error('SMTP credentials are not set. Use EMAIL_USER/EMAIL_PASSWORD or SMTP_USER/SMTP_PASS.');
+  }
 
+  const port = Number(process.env.SMTP_PORT || 465);
+  const secure = process.env.SMTP_SECURE
+    ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
+    : port === 465;
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port,
+    secure,
+    auth: {
+      user: getSmtpUser(),
+      pass: normalizeSmtpPassword(getSmtpPassword()),
+    },
+  });
+};
+
+const sendViaSmtp = async (message) => {
+  const transporter = getSmtpTransporter();
+  const normalizedMessage = {
+    from: message.from || getSender(),
+    replyTo: message.replyTo || getReplyTo(),
+    to: message.to,
+    cc: message.cc,
+    bcc: message.bcc,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+    attachments: message.attachments,
+  };
+
+  const info = await transporter.sendMail(normalizedMessage);
+  console.log('✅ Email sent via SMTP, message-id:', info.messageId || 'n/a');
+  return {
+    success: true,
+    provider: 'smtp',
+    messageId: info.messageId || null,
+  };
+};
+
+const sendViaSendGrid = async (message) => {
+  const client = getSendGridClient();
   const normalizedMessage = {
     ...message,
     from: message.from || getSender(),
@@ -44,23 +102,32 @@ async function sendEmail(message) {
     },
   };
 
+  const [response] = await client.send(normalizedMessage);
+  console.log('✅ Email sent via SendGrid, status:', response.statusCode, 'message-id:', response.headers?.['x-message-id'] || 'n/a');
+  return {
+    success: true,
+    provider: 'sendgrid',
+    statusCode: response.statusCode,
+    messageId: response.headers?.['x-message-id'] || null,
+  };
+};
+
+async function sendEmail(message) {
   try {
-    const [response] = await client.send(normalizedMessage);
-    console.log('✅ Email sent via SendGrid, status:', response.statusCode, 'message-id:', response.headers?.['x-message-id'] || 'n/a');
-    return {
-      success: true,
-      statusCode: response.statusCode,
-      messageId: response.headers?.['x-message-id'] || null,
-    };
+    if (isSmtpConfigured()) {
+      return sendViaSmtp(message);
+    }
+
+    return sendViaSendGrid(message);
   } catch (err) {
     const errBody = err.response?.body || err.message;
-    console.error('❌ SendGrid error:', errBody);
+    console.error(`❌ ${getEmailProvider().toUpperCase()} email error:`, errBody);
     throw new Error(typeof errBody === 'object' ? JSON.stringify(errBody) : errBody);
   }
 }
 
 /**
- * Send OTP email via SendGrid
+ * Send OTP email
  */
 async function sendOTPEmail(email, otp, type = 'signup') {
   const subject = type === 'signup'
@@ -107,7 +174,7 @@ async function sendOTPEmail(email, otp, type = 'signup') {
     categories: ['thinkflow', 'transactional', type === 'signup' ? 'otp-signup' : 'otp-reset'],
   };
 
-  console.log(`📧 Sending OTP email via SendGrid to: ${email}`);
+  console.log(`📧 Sending OTP email via ${getEmailProvider().toUpperCase()} to: ${email}`);
 
   return sendEmail(msg);
 }
@@ -213,6 +280,10 @@ async function sendCompetitionDecisionEmail({
 }
 
 module.exports = {
+  getEmailProvider,
+  isEmailConfigured,
+  isSendGridConfigured,
+  isSmtpConfigured,
   sendCompetitionApprovalRequest,
   sendCompetitionDecisionEmail,
   sendEmail,
