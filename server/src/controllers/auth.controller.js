@@ -21,7 +21,6 @@ const {
   getEmailProvider,
   isEmailConfigured,
   isSendGridConfigured,
-  isSmtpConfigured,
   sendOTPEmail,
 } = require('../services/emailService');
 let OAuth2Client;
@@ -221,7 +220,7 @@ const signup = async (req, res) => {
     const emailConfigured = isEmailConfigured();
     console.log(
       `  📧 Email configured: ${emailConfigured ? 'Yes' : 'No'} ` +
-      `(Provider: ${getEmailProvider()}, SMTP: ${isSmtpConfigured()}, SendGrid: ${isSendGridConfigured()})`
+      `(Provider: ${getEmailProvider()}, SendGrid: ${isSendGridConfigured()})`
     );
 
     if (!emailConfigured) {
